@@ -59,14 +59,12 @@ class RhoData(Dataset):
             return [rotate(rotate(rotate(d))) for d in data_lst]
 
     def __getitem__(self, idx):
-        rho1 = torch.tensor(
-            np.load(self.data[idx]), dtype=torch.float32)
-        size = np.loadtxt(self.data_gs[idx], dtype=int)
+        rho1 = torch.tensor(self.data[idx], dtype=torch.float32)
+        size = torch.tensor(self.data_gs[idx], dtype=int)
         rho1 = rho1.reshape(1, *size)
 
-        rho2 = torch.tensor(
-            np.load(self.label[idx]), dtype=torch.float32)
-        size = np.loadtxt(self.label_gs[idx], dtype=int)
+        rho2 = torch.tensor(self.label[idx], dtype=torch.float32)
+        size = torch.tensor(self.label_gs[idx], dtype=int)
         rho2 = rho2.reshape(1, *size)
 
         if self.da:

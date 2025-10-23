@@ -105,11 +105,8 @@ def train(dataloader, model, loss_fn, optimizer, t, accum_iter=1):
             return loss
 
     optimizer.zero_grad()
-    # print(dataloader)
-    # for batch, (X, y) in enumerate(dataloader):
-    for batch, cont in enumerate(dataloader):
+    for batch, (X, y) in enumerate(dataloader):
         print('batch: ', batch)
-        print('cont: ', cont)
         # print('X: ', X.shape)
         # print('y: ', y.shape)
         X, y = X.to(cfg.device), y.to(cfg.device)
