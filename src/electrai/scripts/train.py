@@ -1,31 +1,40 @@
 import yaml
+import argparse
 from types import SimpleNamespace
 from collections.abc import Callable
 from pathlib import Path
-import argparse
 import numpy as np
 import torch
 from torch.utils.data import DataLoader
-from electrai.dataloader.dataset import RhoData
-from electrai.dataloader.registry import get_dataset
-from resnet_density.software.resnet.srgan_layernorm_pbc import GeneratorResNet
+from dataloader.registry import get_dataset
+from dataloader.dataset import RhoData
+from models.srgan_layernorm_pbc import GeneratorResNet
 
 
 # -------------------------------
 # Load YAML config
 # -------------------------------
-config_path = ??
-with open(config_path, 'r') as f:
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--config",
+    type=str,
+    help="Path to YAML config file"
+)
+args = parser.parse_args()
+
+config_path = Path(args.config)
+with open(config_path, "r") as f:
     cfg_dict = yaml.safe_load(f)
+
 cfg = SimpleNamespace(**cfg_dict)
 
 assert 0 < cfg.train_fraction < 1, "train_fraction must be between 0 and 1."
 assert 2**cfg.n_upscale_layers == cfg.downsample_data / cfg.downsample_label
 
 
-# -------------------------------
-# Dataset / DataLoader
-# -------------------------------
+-------------------------------
+Dataset / DataLoader
+-------------------------------
 train_sets, test_sets = get_dataset(cfg)
 
 train_data = RhoData(*train_sets,
@@ -41,10 +50,13 @@ test_data = RhoData(*test_sets,
 train_loader = DataLoader(train_data, batch_size=int(cfg.nbatch), shuffle=True)
 test_loader = DataLoader(test_data, batch_size=int(cfg.nbatch), shuffle=False)
 
-
 # -------------------------------
 # Model / Optimizer / Scheduler
 # -------------------------------
+torch.cuda.empty_cache()
+print(cfg.device)
+print(torch.cuda.memory_allocated(cfg.device)/1e9, "GB allocated")
+print(torch.cuda.memory_reserved(cfg.device)/1e9, "GB reserved")
 model = GeneratorResNet(
     n_residual_blocks=int(cfg.n_residual_blocks),
     n_upscale_layers=int(cfg.n_upscale_layers),
@@ -53,6 +65,8 @@ model = GeneratorResNet(
     K2=int(cfg.kernel_size2),
     normalize=not cfg.normalize_label
 ).to(cfg.device)
+
+print("train chckpt")
 
 optimizer = torch.optim.Adam(model.parameters(), lr=float(cfg.lr), weight_decay=float(cfg.weight_decay))
 

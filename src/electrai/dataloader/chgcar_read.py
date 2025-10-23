@@ -26,6 +26,7 @@ class RhoRead:
         train_fraction: fraction of the data used for training (0 to 1).
         '''
         self.data_dir = Path(data_dir)
+        print(self.data_dir)
         self.label_dir = Path(label_dir)
         self.map_dir = Path(map_dir)
         self.rho_type = rho_type
@@ -40,25 +41,30 @@ class RhoRead:
         '''
         data = loadfn(data_dir)
         charge = data['data'].data["total"]
-        gridsize = charge.shape()
+        gridsize = charge.shape
         if self.rho_type == 'chgcar' and self.normalize:
             charge /= np.prod(gridsize)
         return charge.flatten(), gridsize 
     
-    def read_data(self, ?):
+    def read_data(self, data_dir): # will later change it to input directory
         '''
+        data_dir: directory of json-formatted chg or elfcar files.
         '''
-        return charge.flatten(), gridsize
+        data = loadfn(data_dir)
+        charge = data['data'].data["total"]
+        gridsize = charge.shape
+        if self.rho_type == 'chgcar' and self.normalize:
+            charge /= np.prod(gridsize)
+        return charge.flatten(), gridsize 
     
     def data_split(self):
-        with open(self.map_dir) as f:
-            mapping = json.load(f)
+        mapping = loadfn(f)
         data_list, label_list = [], []
         gs_data_list, gs_label_list = [], []
 
         for task_id in mapping[self.functional]: 
-            data_dir = self.label_dir / ?
-            label_dir = self.data_dir / f"{tas_id}.json.gz"
+            data_dir = self.label_dir / f"{task_id}.json.gz"
+            label_dir = self.data_dir / f"{task_id}.json.gz"
             data, gs_data = self.read_data(data_dir)
             label, gs_label = self.read_label(label_dir)
             
@@ -89,7 +95,7 @@ def load_data(cfg):
         map_dir=cfg.map_dir,
         rho_type=cfg.rho_type,
         functional=cfg.functional,
-        normalize=cfg.normalize,
+        normalize=cfg.normalize_data,
         train_fraction=cfg.train_fraction,
         random_state=cfg.random_state,
     )

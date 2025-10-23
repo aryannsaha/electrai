@@ -14,17 +14,17 @@ class RhoData(Dataset):
         self.ds_label = downsample_label
         self.da = data_augmentation
 
-        self.data = data
-        self.data_gs = data_gridsizes
-        self.label = label
-        self.label_gs = label_gridsizes
+        self.data = list_data
+        self.data_gs = list_data_gridsizes
+        self.label = list_label
+        self.label_gs = list_label_gridsizes
 
         assert len(self.data) == len(self.data_gs)
         assert len(self.data) == len(self.label)
         assert len(self.data) == len(self.label_gs)
 
     def __len__(self):
-        return self.data.shape[0]
+        return len(self.data)
 
     def rotate_x(self, data_in):
         '''
