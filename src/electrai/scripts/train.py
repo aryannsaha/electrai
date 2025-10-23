@@ -47,6 +47,8 @@ test_data = RhoData(*test_sets,
                     downsample_label=cfg.downsample_label,
                     data_augmentation=False)
 
+print('train_data: ', train_data)
+
 train_loader = DataLoader(train_data, batch_size=int(cfg.nbatch), shuffle=True)
 test_loader = DataLoader(test_data, batch_size=int(cfg.nbatch), shuffle=False)
 
@@ -61,8 +63,6 @@ model = GeneratorResNet(
     K2=int(cfg.kernel_size2),
     normalize=not cfg.normalize_label
 ).to(cfg.device)
-
-print("train chckpt")
 
 optimizer = torch.optim.Adam(model.parameters(), lr=float(cfg.lr), weight_decay=float(cfg.weight_decay))
 
@@ -105,7 +105,13 @@ def train(dataloader, model, loss_fn, optimizer, t, accum_iter=1):
             return loss
 
     optimizer.zero_grad()
-    for batch, (X, y) in enumerate(dataloader):
+    # print(dataloader)
+    # for batch, (X, y) in enumerate(dataloader):
+    for batch, cont in enumerate(dataloader):
+        print('batch: ', batch)
+        print('cont: ', cont)
+        # print('X: ', X.shape)
+        # print('y: ', y.shape)
         X, y = X.to(cfg.device), y.to(cfg.device)
         pred = model(X)
 

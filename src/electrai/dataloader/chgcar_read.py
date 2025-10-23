@@ -26,7 +26,6 @@ class RhoRead:
         train_fraction: fraction of the data used for training (0 to 1).
         '''
         self.data_dir = Path(data_dir)
-        print(self.data_dir)
         self.label_dir = Path(label_dir)
         self.map_dir = Path(map_dir)
         self.rho_type = rho_type
