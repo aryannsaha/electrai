@@ -58,7 +58,7 @@ class RhoRead:
         return charge.flatten(), gridsize 
     
     def data_split(self):
-        mapping = loadfn(f)
+        mapping = loadfn(self.map_dir)
         data_list, label_list = [], []
         gs_data_list, gs_label_list = [], []
 

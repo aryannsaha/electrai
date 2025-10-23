@@ -32,9 +32,9 @@ assert 0 < cfg.train_fraction < 1, "train_fraction must be between 0 and 1."
 assert 2**cfg.n_upscale_layers == cfg.downsample_data / cfg.downsample_label
 
 
--------------------------------
-Dataset / DataLoader
--------------------------------
+# -------------------------------
+# Dataset / DataLoader
+# -------------------------------
 train_sets, test_sets = get_dataset(cfg)
 
 train_data = RhoData(*train_sets,
@@ -53,10 +53,6 @@ test_loader = DataLoader(test_data, batch_size=int(cfg.nbatch), shuffle=False)
 # -------------------------------
 # Model / Optimizer / Scheduler
 # -------------------------------
-torch.cuda.empty_cache()
-print(cfg.device)
-print(torch.cuda.memory_allocated(cfg.device)/1e9, "GB allocated")
-print(torch.cuda.memory_reserved(cfg.device)/1e9, "GB reserved")
 model = GeneratorResNet(
     n_residual_blocks=int(cfg.n_residual_blocks),
     n_upscale_layers=int(cfg.n_upscale_layers),
