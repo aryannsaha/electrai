@@ -2,6 +2,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 import numpy as np
 
+# !!! Reading in all the data at once is probably not a good idea, we better just read in the filenames, and have __getitem__ read each index in instead.
+# The could should be updates as such. 
 class RhoData(Dataset):
     def __init__(self, list_data, list_label, list_data_gridsizes, list_label_gridsizes, data_augmentation=True, downsample_data=1, downsample_label=1):
         '''
