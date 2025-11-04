@@ -22,7 +22,7 @@ def load_my_dataset(cfg):
 
 ## 📁 Materials Project Data
 
-Charge densities are provided in the `task-id.json.gz` format, with instructions for S3 access and download available [here](../../../data/MP/s3_download/README.md). Crude densities were generated using a minimal DFT calculation in VASP via the [QuAcc](https://github.com/Quantum-Accelerators/quacc) platform and are loade in `CHGCAR` format.
+Charge densities are provided in the `task-id.json.gz` format, with instructions for S3 access and download available [here](../../../data/MP/README.md). Crude densities were generated using a minimal DFT calculation in VASP via the [QuAcc](https://github.com/Quantum-Accelerators/quacc) platform and are loade in `CHGCAR` format.
 
 If the data has been downloaded via S3, it is already filtered by `exchange-correlation functional`. Otherwise, a mapping dictionary is required, similar to [map_sample.json.gz](../../../data/MP/map/map_sample.json.gz).
 
