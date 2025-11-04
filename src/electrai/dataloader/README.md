@@ -27,3 +27,5 @@ Charge densities are provided in the `task-id.json.gz` format, with instructions
 If the data has been downloaded via S3, it is already filtered by `exchange-correlation functional`. Otherwise, a mapping dictionary is required, similar to [map_sample.json.gz](../../../data/MP/map/map_sample.json.gz).
 
 The final dimensions of the input/output charge densities can be adjusted via `cfg.data_size` and `cfg.label_size`, which are processed by the dataloader.
+
+## ⚡ Zarr conversion
