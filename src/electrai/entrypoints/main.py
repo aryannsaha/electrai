@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+import argparse
+
+from src.electrai.entrypoints.train import train
+
+
+def main() -> None:
+    """Entry point.
+
+    Parameters
+    ----------
+    args : list[str]
+        list of command line arguments
+
+    Raises
+    ------
+    RuntimeError
+        if no command was input
+    """
+    parser = argparse.ArgumentParser(description="Electrai Entry Point")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    train_parser = subparsers.add_parser("train", help="Train the model")
+    train_parser.add_argument("--config", type=str, required=True)
+
+    args = parser.parse_args()
+
+    if args.command == "train":
+        train(args)
+    else:
+        raise ValueError(f"Unknown command: {args.command}")
+
+
+if __name__ == "__main__":
+    main()
