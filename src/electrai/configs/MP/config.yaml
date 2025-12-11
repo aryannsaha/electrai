@@ -1,0 +1,38 @@
+# Dataset / loader parameters
+dataset_name: "mp"
+data_path: /scratch/gpfs/ROSENGROUP/common/globus_share_OA/mp/data/subset/chgcars/
+label_path: /scratch/gpfs/ROSENGROUP/common/globus_share_OA/mp/label/subset/chgcars/
+map_path: /scratch/gpfs/ROSENGROUP/common/globus_share_OA/mp/data/subset/map.json.gz
+rho_type: chgcar
+functional: GGA
+train_fraction: 0.9
+num_workers: 1
+downsample_label: 1
+downsample_data: 0
+data_augmentation: False
+random_state: 42
+normalize: True
+data_precision: f32
+
+# Model parameters
+n_channels: 32
+n_residual_blocks: 32
+n_upscale_layers: 0
+kernel_size1: 5
+kernel_size2: 5
+model_prefix: chk
+model_precision: 32
+
+# Training parameters
+use_checkpoint: True
+save_every_epochs: 2
+epochs: 10
+nbatch: 1
+lr: 0.01
+weight_decay: 0.0
+warmup_length: 1
+
+# Weights and biases
+wandb_mode: offline
+wb_pname: uniform-data-training
+entity: PrinceOA
