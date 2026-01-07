@@ -25,7 +25,7 @@ model_precision: 32
 # Training parameters
 save_every_epochs: 2
 epochs: 10
-nbatch: 1
+nbatch: 4
 lr: 0.01
 weight_decay: 0.0
 warmup_length: 1
