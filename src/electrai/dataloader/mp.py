@@ -23,7 +23,7 @@ class RhoRead:
         map_path: Path,
         functional: str,
         train_fraction: float,
-        random_state: int = 42,
+        random_seed: int = 42,
     ):
         """
         Parameters
@@ -39,7 +39,7 @@ class RhoRead:
         self.map_path = Path(map_path)
         self.functional = functional
         self.tf = train_fraction
-        self.rs = random_state
+        self.seed = random_seed
 
     def data_split(self):
         with gzip.open(self.map_path, "rt") as f:
@@ -53,7 +53,7 @@ class RhoRead:
             )
             data_list.append(data)
         train_data, test_data = train_test_split(
-            data_list, train_size=self.tf, random_state=self.rs
+            data_list, train_size=self.tf, random_state=self.seed
         )
         return train_data, test_data
 
@@ -65,7 +65,6 @@ class RhoData(Dataset):
         data_precision: str,
         rho_type: str,
         data_augmentation: bool = True,
-        random_state: int = 42,
     ):
         """
         Parameters
@@ -80,7 +79,6 @@ class RhoData(Dataset):
         self.data_precision = data_precision
         self.rho_type = rho_type
         self.da = data_augmentation
-        self.rng = np.random.default_rng(random_state)
 
     def __len__(self):
         return len(self.data)
@@ -98,7 +96,7 @@ class RhoData(Dataset):
         return data_in.transpose(-2, -3).flip(-2)
 
     def rand_rotate(self, data_lst):
-        rint = self.rng.integers(0, 3)
+        rint = torch.randint(0, 3, ()).item()
         if rint == 0:
 
             def rotate(d):
@@ -112,7 +110,7 @@ class RhoData(Dataset):
             def rotate(d):
                 return self.rotate_z(d)
 
-        r = self.rng.random()
+        r = torch.rand(()).item()
         if r < 0.1:
             return data_lst
         elif r < 0.4:
@@ -168,22 +166,14 @@ def load_data(cfg):
         map_path=cfg.map_path,
         functional=cfg.functional,
         train_fraction=cfg.train_fraction,
-        random_state=cfg.random_state,
+        random_seed=cfg.random_seed,
     ).data_split()
 
     train_data = RhoData(
-        train_set,
-        cfg.data_precision,
-        cfg.rho_type,
-        cfg.data_augmentation,
-        cfg.random_state,
+        train_set, cfg.data_precision, cfg.rho_type, cfg.data_augmentation
     )
 
     test_data = RhoData(
-        test_set,
-        cfg.data_precision,
-        cfg.rho_type,
-        cfg.data_augmentation,
-        cfg.random_state,
+        test_set, cfg.data_precision, cfg.rho_type, cfg.data_augmentation
     )
     return train_data, test_data
