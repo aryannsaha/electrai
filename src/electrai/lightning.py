@@ -6,9 +6,10 @@ import time
 import numpy as np
 import torch
 import torch.distributed as dist
+from hydra.utils import instantiate
 from lightning.pytorch import LightningModule
+from pathlim import Path
 from src.electrai.model.loss.charge import NormMAE
-from src.electrai.model.srgan_layernorm_pbc import GeneratorResNet
 
 
 class LightningGenerator(LightningModule):
@@ -16,15 +17,7 @@ class LightningGenerator(LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.cfg = cfg
-        self.model = GeneratorResNet(
-            n_residual_blocks=int(cfg.n_residual_blocks),
-            n_upscale_layers=int(cfg.n_upscale_layers),
-            C=int(cfg.n_channels),
-            K1=int(cfg.kernel_size1),
-            K2=int(cfg.kernel_size2),
-            normalize=cfg.normalize,
-            use_checkpoint=getattr(cfg, "use_checkpoint", True),
-        )
+        self.model = instantiate(cfg.model)
         self.loss_fn = NormMAE()
 
     def forward(self, x):
@@ -93,7 +86,7 @@ class LightningGenerator(LightningModule):
         self.save_pred = self.test_cfg.save_pred
         self.test_outputs = []
 
-    def test_step(self, batch, batch_idx):
+    def test_step(self, batch):
         x = batch["data"]
         y = batch["label"]
         indices = batch["index"]
@@ -120,7 +113,7 @@ class LightningGenerator(LightningModule):
             out["pred"] = preds.detach().cpu()
         return out
 
-    def on_test_batch_end(self, outputs, batch, batch_idx):
+    def on_test_batch_end(self, outputs, batch_idx):
         indices = outputs["index"]
         nmae = outputs["nmae"]
 
@@ -138,7 +131,7 @@ class LightningGenerator(LightningModule):
         tmp_csv = (
             self.tmp_dir / f"metrics_rank_{self.global_rank}_batch_{batch_idx}.csv"
         )
-        with open(tmp_csv, "w") as f:
+        with Path.open(tmp_csv, "w") as f:
             for idx, n in zip(indices, nmae, strict=True):
                 f.write(f"rank_{self.global_rank},{idx},{n.item()}\n")
 
@@ -174,10 +167,10 @@ class LightningGenerator(LightningModule):
                     f"Expected {expected_total} CSV files but found {len(all_tmp_csvs)}."
                 )
 
-            with open(final_csv, "w") as f_out:
+            with Path.open(final_csv, "w") as f_out:
                 f_out.write("rank,index,nmae\n")
                 for tmp_csv in all_tmp_csvs:
-                    with open(tmp_csv) as f_in:
+                    with Path.open(tmp_csv) as f_in:
                         for line in f_in:
                             f_out.write(line)
 
