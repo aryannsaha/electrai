@@ -81,16 +81,11 @@ class ResUNet3D(nn.Module):
         for _ in range(depth):
             self.ups.append(PeriodicUpsampleConv3d(ch, ch // 2))
             ch //= 2
-            self.dec_blocks.append(
-                nn.Sequential(
-                    *[
-                        ResBlock3D(
-                            2 * ch, ch, kernel_size, use_checkpoint=use_checkpoint
-                        )
-                        for _ in range(n_residual_blocks)
-                    ]
-                )
+            blocks = [ResBlock3D(2 * ch, ch, kernel_size, use_checkpoint=use_checkpoint)]
+            blocks.extend(
+                [ResBlock3D(ch, ch, kernel_size, use_checkpoint=use_checkpoint) for _ in range(n_residual_blocks - 1)]
             )
+            self.dec_blocks.append(nn.Sequential(*blocks))
 
         # -------- Output --------
         self.out_conv = nn.Conv3d(n_channels, out_channels, kernel_size=1)
@@ -110,7 +105,7 @@ class ResUNet3D(nn.Module):
             out = torch.cat([out, skips.pop()], dim=1)
             out = dec(out)
         out = self.out_conv(out)
-        out = out / (torch.sum(out, axis=(-3, -2, -1))[..., None, None, None] + 1e-8)
+        out = out / torch.sum(out, axis=(-3, -2, -1))[..., None, None, None]
         return out * torch.sum(x, axis=(-3, -2, -1))[..., None, None, None]
 
 

@@ -70,10 +70,10 @@ def train(args):
         logger=wandb_logger,
         callbacks=[checkpoint_cb, lr_monitor],
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        precision=cfg.precision,
         devices="auto",
         num_nodes=num_nodes,
         strategy="ddp",
-        precision=cfg.model_precision,
         log_every_n_steps=1,
         gradient_clip_val=getattr(cfg, "gradient_clip_value", 1.0),
     )

@@ -97,7 +97,6 @@ class RhoRead(LightningDataModule):
     def on_exception(self, _exception: BaseException) -> None:
         return
 
-
 class RhoData(Dataset):
     def __init__(self, datapath: str, precision: str, augmentation: bool, **kwargs):
         super().__init__(**kwargs)
