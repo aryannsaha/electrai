@@ -7,6 +7,7 @@ docs/reference/*
 /site
 lightning_logs
 .claude
+wandb
 
 # Python ignores
 __pycache__/
