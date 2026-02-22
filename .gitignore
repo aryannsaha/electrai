@@ -5,6 +5,8 @@ examples/MP/experiments
 docs/reference/*
 *doctrees*
 /site
+lightning_logs
+.claude
 
 # Python ignores
 __pycache__/
