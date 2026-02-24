@@ -31,6 +31,8 @@ class RhoRead(LightningDataModule):
         split_file: str | bytes | os.PathLike | None = None,
         augmentation: bool = False,
         random_seed: int = 42,
+        downsample_data: int = 2,
+        downsample_label: int = 1,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -45,10 +47,13 @@ class RhoRead(LightningDataModule):
         self.precision = precision
         self.augmentation = augmentation
         self.random_seed = random_seed
+        self.downsample_data = downsample_data
+        self.downsample_label = downsample_label
 
     def setup(self, stage=None):
         dataset = RhoData(
-            self.root, precision=self.precision, augmentation=self.augmentation
+            self.root, precision=self.precision, augmentation=self.augmentation,
+            downsample_data=self.downsample_data, downsample_label=self.downsample_label,
         )
         self.subsets = split_data(
             dataset,
@@ -96,10 +101,12 @@ class RhoRead(LightningDataModule):
 
 
 class RhoData(Dataset):
-    def __init__(self, datapath: str, precision: str, augmentation: bool, **kwargs):
+    def __init__(self, datapath: str, precision: str, augmentation: bool, downsample_data: int = 1, downsample_label: int = 1, **kwargs):
         super().__init__(**kwargs)
         self.aug = augmentation
         self.precision = precision
+        self.downsample_data = downsample_data
+        self.downsample_label = downsample_label
         if isinstance(datapath, str) and Path(datapath).is_file():
             with Path(datapath).open() as f:
                 lines = f.readlines()
@@ -123,6 +130,19 @@ class RhoData(Dataset):
             precision=self.precision,
             augmentation=self.aug,
         )
+        ds1 = self.downsample_data
+        ds2 = self.downsample_label
+        nx, ny, nz = data.shape[-3:]
+        nx = nx // ds1 * ds1
+        ny = ny // ds1 * ds1
+        nz = nz // ds1 * ds1
+        data = data[..., :nx:ds1,:ny:ds1,:nz:ds1]
+        nx, ny, nz = label.shape[-3:]
+        nx = nx // ds1 * ds1
+        ny = ny // ds1 * ds1
+        nz = nz // ds1 * ds1
+        label = label[..., :nx:ds2,:ny:ds2,:nz:ds2]
+
         data = data.unsqueeze(0)
         label = label.unsqueeze(0)
         return {"data": data, "label": label, "index": index}

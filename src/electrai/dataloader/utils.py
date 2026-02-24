@@ -44,6 +44,7 @@ def load_chgcar(root: str | bytes | os.PathLike, index: str):
 
 
 def load_npy(root: str | bytes | os.PathLike, index: str):
+    index = int(index)
     data_size = np.loadtxt(
         root / "data" / f"dsgdb9nsd_{index:06d}" / "grid_sizes_22.dat", dtype=int
     )
