@@ -30,7 +30,17 @@ def train(args):
     # -----------------------------
     # Model (LightningModule handles architecture + loss + optimizer)
     # -----------------------------
-    lit_model = LightningGenerator(cfg)
+    # Check if the config specifies flow matching mode.
+    # If training_mode == "flow_match", we use LightningFlowMatch which implements
+    # the rectified flow training loop (velocity prediction with MSE loss).
+    # Otherwise, we use the original LightningGenerator (direct regression with NormMAE).
+    training_mode = getattr(cfg, "training_mode", "default")
+    if training_mode == "flow_match":
+        from electrai.lightning_flow_match import LightningFlowMatch
+
+        lit_model = LightningFlowMatch(cfg)
+    else:
+        lit_model = LightningGenerator(cfg)
 
     # -----------------------------
     # Logging and callbacks
@@ -77,6 +87,8 @@ def train(args):
         strategy="ddp",
         log_every_n_steps=1,
         gradient_clip_val=getattr(cfg, "gradient_clip_value", 1.0),
+        limit_train_batches=getattr(cfg, "limit_train_batches", 1.0),
+        limit_val_batches=getattr(cfg, "limit_val_batches", 1.0),
     )
 
     # -----------------------------
