@@ -22,6 +22,7 @@ class RhoRead:
         exclude_path: Path,
         train_fraction: float,
         random_state: int = 42,
+        max_samples: int | None = None,
     ):
         """
         Parameters
@@ -29,12 +30,14 @@ class RhoRead:
         data_path: path of input chgcar or elfcar files.
         label_path: path of label chgcar or elfcar files.
         train_fraction: fraction of the data used for training (0 to 1).
+        max_samples: if set, limit total samples (before train/test split) to this number.
         """
         self.data_path = Path(data_path)
         self.label_path = Path(label_path)
         self.exclude_path = Path(exclude_path)
         self.tf = train_fraction
         self.rs = random_state
+        self.max_samples = max_samples
 
     def data_split(self):
         data_list = []
@@ -50,6 +53,10 @@ class RhoRead:
                 self.label_path / mol_dir / "grid_sizes_22.dat",
             )
             data_list.append(data)
+        if self.max_samples is not None and len(data_list) > self.max_samples: # add random
+            rng = np.random.default_rng(self.rs)
+            indices = rng.choice(len(data_list), self.max_samples, replace=False)
+            data_list = [data_list[i] for i in indices]
         train_data, test_data = train_test_split(
             data_list, train_size=self.tf, random_state=self.rs
         )
@@ -166,6 +173,7 @@ def load_data(cfg):
         exclude_path=cfg.exclude_path,
         train_fraction=cfg.train_fraction,
         random_state=cfg.random_state,
+        max_samples=getattr(cfg, "max_samples", None),
     ).data_split()
 
     train_data = RhoData(
