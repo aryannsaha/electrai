@@ -52,8 +52,11 @@ class RhoRead(LightningDataModule):
 
     def setup(self, stage=None):
         dataset = RhoData(
-            self.root, precision=self.precision, augmentation=self.augmentation,
-            downsample_data=self.downsample_data, downsample_label=self.downsample_label,
+            self.root,
+            precision=self.precision,
+            augmentation=self.augmentation,
+            downsample_data=self.downsample_data,
+            downsample_label=self.downsample_label,
         )
         self.subsets = split_data(
             dataset,
@@ -101,7 +104,15 @@ class RhoRead(LightningDataModule):
 
 
 class RhoData(Dataset):
-    def __init__(self, datapath: str, precision: str, augmentation: bool, downsample_data: int = 1, downsample_label: int = 1, **kwargs):
+    def __init__(
+        self,
+        datapath: str,
+        precision: str,
+        augmentation: bool,
+        downsample_data: int = 1,
+        downsample_label: int = 1,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.aug = augmentation
         self.precision = precision
@@ -136,12 +147,12 @@ class RhoData(Dataset):
         nx = nx // ds1 * ds1
         ny = ny // ds1 * ds1
         nz = nz // ds1 * ds1
-        data = data[..., :nx:ds1,:ny:ds1,:nz:ds1]
+        data = data[..., :nx:ds1, :ny:ds1, :nz:ds1]
         nx, ny, nz = label.shape[-3:]
         nx = nx // ds1 * ds1
         ny = ny // ds1 * ds1
         nz = nz // ds1 * ds1
-        label = label[..., :nx:ds2,:ny:ds2,:nz:ds2]
+        label = label[..., :nx:ds2, :ny:ds2, :nz:ds2]
 
         data = data.unsqueeze(0)
         label = label.unsqueeze(0)
