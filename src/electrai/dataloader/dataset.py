@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
 import torch
 from lightning.pytorch import LightningDataModule
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 
 from electrai.dataloader import utils
 from electrai.dataloader.collate import collate_fn
@@ -33,6 +34,7 @@ class RhoRead(LightningDataModule):
         random_seed: int = 42,
         downsample_data: int = 2,
         downsample_label: int = 1,
+        max_samples: int | None = None,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -49,12 +51,17 @@ class RhoRead(LightningDataModule):
         self.random_seed = random_seed
         self.downsample_data = downsample_data
         self.downsample_label = downsample_label
+        self.max_samples = max_samples
 
     def setup(self, stage=None):
         dataset = RhoData(
             self.root, precision=self.precision, augmentation=self.augmentation,
             downsample_data=self.downsample_data, downsample_label=self.downsample_label,
         )
+        if self.max_samples is not None and len(dataset) > self.max_samples:
+            rng = np.random.default_rng(self.random_seed)
+            indices = rng.choice(len(dataset), self.max_samples, replace=False)
+            dataset = Subset(dataset, indices.tolist())
         self.subsets = split_data(
             dataset,
             val_frac=self.val_frac,
