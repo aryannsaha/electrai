@@ -20,23 +20,12 @@ from torch.utils.checkpoint import checkpoint
 
 
 def get_timestep_embedding(timesteps: torch.Tensor, embedding_dim: int) -> torch.Tensor:
-    """Sinusoidal timestep embedding, following the original RectifiedFlow/NCSN++ implementation.
-
-    Parameters
-    ----------
-    timesteps : torch.Tensor
-        1D tensor of timestep values, shape (B,).
-    embedding_dim : int
-        Dimension of the embedding.
-
-    Returns
-    -------
-    torch.Tensor
-        Embedding of shape (B, embedding_dim).
-    """
+    """Sinusoidal timestep embedding, following the original RectifiedFlow/NCSN++ implementation."""
     half_dim = embedding_dim // 2
     emb = math.log(10000) / (half_dim - 1)
-    emb = torch.exp(torch.arange(half_dim, device=timesteps.device, dtype=torch.float32) * -emb)
+    emb = torch.exp(
+        torch.arange(half_dim, device=timesteps.device, dtype=torch.float32) * -emb,
+    )
     emb = timesteps.float()[:, None] * emb[None, :]
     emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
     if embedding_dim % 2 == 1:
@@ -44,60 +33,86 @@ def get_timestep_embedding(timesteps: torch.Tensor, embedding_dim: int) -> torch
     return emb
 
 
+def _make_group_norm(num_channels: int, num_groups: int) -> nn.GroupNorm:
+    groups = min(num_groups, num_channels)
+    while groups > 1 and num_channels % groups != 0:
+        groups -= 1
+    return nn.GroupNorm(groups, num_channels)
+
+
 class TimeResidualBlock(nn.Module):
-    """Residual block with additive timestep injection.
+    """Residual block with time and conditioning injection."""
 
-    Matches the NCSN++ ResBlock style: after the first conv+norm+act,
-    the time embedding is added to the feature map via a linear projection.
-    """
-
-    def __init__(self, in_features: int, temb_dim: int, K: int = 3, use_checkpoint: bool = True):
+    def __init__(
+        self,
+        in_features: int,
+        temb_dim: int,
+        cond_features: int,
+        K: int = 3,
+        norm_groups: int = 8,
+        use_checkpoint: bool = True,
+    ):
         super().__init__()
         self.use_checkpoint = use_checkpoint
 
         self.conv1 = nn.Conv3d(
-            in_features, in_features, kernel_size=K,
-            stride=1, padding="same", padding_mode="circular",
+            in_features,
+            in_features,
+            kernel_size=K,
+            stride=1,
+            padding='same',
+            padding_mode='circular',
         )
-        self.norm1 = nn.InstanceNorm3d(in_features)
+        self.norm1 = _make_group_norm(in_features, norm_groups)
         self.act1 = nn.PReLU()
 
-        # Time embedding projection: temb_dim -> in_features
-        self.dense = nn.Linear(temb_dim, in_features)
+        self.time_dense = nn.Linear(temb_dim, in_features)
+        self.cond_proj = nn.Conv3d(cond_features, in_features, kernel_size=1)
+        self.cond_gate = nn.Linear(temb_dim, in_features)
 
         self.conv2 = nn.Conv3d(
-            in_features, in_features, kernel_size=K,
-            stride=1, padding="same", padding_mode="circular",
+            in_features,
+            in_features,
+            kernel_size=K,
+            stride=1,
+            padding='same',
+            padding_mode='circular',
         )
-        self.norm2 = nn.InstanceNorm3d(in_features)
+        self.norm2 = _make_group_norm(in_features, norm_groups)
 
-    def _forward(self, x: torch.Tensor, temb: torch.Tensor) -> torch.Tensor:
+    def _forward(
+        self,
+        x: torch.Tensor,
+        temb: torch.Tensor,
+        cond: torch.Tensor,
+    ) -> torch.Tensor:
         h = self.conv1(x)
         h = self.norm1(h)
         h = self.act1(h)
 
-        # Additive time injection: project temb and broadcast over spatial dims
-        h = h + self.dense(torch.nn.functional.silu(temb))[:, :, None, None, None]
+        temb_act = torch.nn.functional.silu(temb)
+        time_term = self.time_dense(temb_act)[:, :, None, None, None]
+        cond_gate = torch.sigmoid(self.cond_gate(temb_act))[:, :, None, None, None]
+        cond_term = self.cond_proj(cond)
+        h = h + time_term + cond_gate * cond_term
 
         h = self.conv2(h)
         h = self.norm2(h)
         return x + h
 
-    def forward(self, x: torch.Tensor, temb: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        x: torch.Tensor,
+        temb: torch.Tensor,
+        cond: torch.Tensor,
+    ) -> torch.Tensor:
         if self.use_checkpoint and self.training:
-            return checkpoint(self._forward, x, temb, use_reentrant=False)
-        return self._forward(x, temb)
+            return checkpoint(self._forward, x, temb, cond, use_reentrant=False)
+        return self._forward(x, temb, cond)
 
 
 class FlowMatchGeneratorResNet(nn.Module):
-    """ResNet backbone for Rectified Flow, with timestep conditioning.
-
-    Architecture mirrors GeneratorResNet but with:
-      - Sinusoidal time embedding -> MLP -> additive injection per block
-      - No output activation (velocity field can be negative)
-      - No charge normalization (applied as post-processing if needed)
-      - n_upscale_layers should be 0 for faithful rectified flow
-    """
+    """ResNet backbone for Rectified Flow, with timestep conditioning."""
 
     def __init__(
         self,
@@ -107,84 +122,110 @@ class FlowMatchGeneratorResNet(nn.Module):
         n_channels: int = 64,
         kernel_size1: int = 5,
         kernel_size2: int = 3,
+        state_channels: int = 1,
+        cond_channels: int | None = None,
+        norm_groups: int = 8,
         use_checkpoint: bool = True,
     ):
         super().__init__()
         self.use_checkpoint = use_checkpoint
+        self.state_channels = state_channels
+        self.cond_channels = (
+            in_channels - state_channels if cond_channels is None else cond_channels
+        )
+        if self.cond_channels <= 0:
+            raise ValueError('cond_channels must be positive for conditional flow matching.')
+        if self.state_channels + self.cond_channels != in_channels:
+            raise ValueError(
+                'state_channels + cond_channels must equal in_channels '
+                f'(got {self.state_channels} + {self.cond_channels} != {in_channels}).',
+            )
 
-        # Timestep embedding: sinusoidal -> MLP
         temb_dim = n_channels * 4
         self.temb_net = nn.Sequential(
             nn.Linear(n_channels, temb_dim),
             nn.SiLU(),
             nn.Linear(temb_dim, temb_dim),
         )
-        self.temb_input_dim = n_channels  # for get_timestep_embedding
+        self.temb_input_dim = n_channels
 
-        # First layer
-        self.conv1 = nn.Sequential(
+        self.state_encoder = nn.Sequential(
             nn.Conv3d(
-                in_channels, n_channels, kernel_size=kernel_size1,
-                stride=1, padding="same", padding_mode="circular",
+                self.state_channels,
+                n_channels,
+                kernel_size=kernel_size1,
+                stride=1,
+                padding='same',
+                padding_mode='circular',
             ),
             nn.PReLU(),
         )
+        self.cond_encoder = nn.Sequential(
+            nn.Conv3d(
+                self.cond_channels,
+                n_channels,
+                kernel_size=kernel_size1,
+                stride=1,
+                padding='same',
+                padding_mode='circular',
+            ),
+            nn.PReLU(),
+        )
+        self.input_fuse = nn.Conv3d(n_channels * 2, n_channels, kernel_size=1)
 
-        # Residual blocks with time conditioning
         self.res_blocks = nn.ModuleList([
             TimeResidualBlock(
-                n_channels, temb_dim, K=kernel_size2, use_checkpoint=use_checkpoint,
+                n_channels,
+                temb_dim,
+                cond_features=n_channels,
+                K=kernel_size2,
+                norm_groups=norm_groups,
+                use_checkpoint=use_checkpoint,
             )
             for _ in range(n_residual_blocks)
         ])
 
-        # Second conv layer post residual blocks
         self.conv2 = nn.Sequential(
             nn.Conv3d(
-                n_channels, n_channels, kernel_size=kernel_size2,
-                stride=1, padding="same", padding_mode="circular",
+                n_channels,
+                n_channels,
+                kernel_size=kernel_size2,
+                stride=1,
+                padding='same',
+                padding_mode='circular',
             ),
-            nn.InstanceNorm3d(n_channels),
+            _make_group_norm(n_channels, norm_groups),
         )
+        self.cond_skip = nn.Conv3d(n_channels, n_channels, kernel_size=1)
 
-        # Final output layer — no activation (velocity can be negative)
         self.conv3 = nn.Conv3d(
-            n_channels, out_channels, kernel_size=kernel_size1,
-            stride=1, padding="same", padding_mode="circular",
+            n_channels,
+            out_channels,
+            kernel_size=kernel_size1,
+            stride=1,
+            padding='same',
+            padding_mode='circular',
         )
 
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
-        """Forward pass.
-
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input tensor of shape (B, in_channels, D, H, W).
-            Typically [z_t, LR_conditioning] concatenated along channel dim.
-        t : torch.Tensor
-            Timestep values, shape (B,), in [0, 1].
-
-        Returns
-        -------
-        torch.Tensor
-            Predicted velocity field, shape (B, out_channels, D, H, W).
-        """
-        # Timestep embedding
+        """Forward pass."""
         temb = get_timestep_embedding(t * 999, self.temb_input_dim)
         temb = self.temb_net(temb)
 
-        # First conv
-        out1 = self.conv1(x)
+        state, cond = torch.split(
+            x,
+            [self.state_channels, self.cond_channels],
+            dim=1,
+        )
+        state_feat = self.state_encoder(state)
+        cond_feat = self.cond_encoder(cond)
+        out1 = self.input_fuse(torch.cat([state_feat, cond_feat], dim=1))
 
-        # Residual blocks with time conditioning
         out = out1
         for block in self.res_blocks:
-            out = block(out, temb)
+            out = block(out, temb, cond_feat)
 
-        # Post-residual conv + skip connection
         out2 = self.conv2(out)
         out = torch.add(out1, out2)
-
-        # Output
-        out = self.conv3(out)
-        return out
+        out = torch.add(out, self.cond_skip(cond_feat))
+        return self.conv3(out)

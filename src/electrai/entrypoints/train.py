@@ -31,8 +31,8 @@ def train(args):
     # -----------------------------
     # Model (LightningModule handles architecture + loss + optimizer)
     # -----------------------------
-    training_mode = getattr(cfg, "training_mode", "default")
-    if training_mode == "flow_match":
+    training_mode = getattr(cfg, 'training_mode', 'default')
+    if training_mode == 'flow_match':
         lit_model = LightningFlowMatch(cfg)
     else:
         lit_model = LightningGenerator(cfg)
@@ -40,59 +40,61 @@ def train(args):
     # -----------------------------
     # Logging and callbacks
     # -----------------------------
-    wandb_mode = getattr(cfg, "wandb_mode", "disabled").lower()
-    os.environ["WANDB_MODE"] = wandb_mode
-    if wandb_mode != "disabled":
+    wandb_mode = getattr(cfg, 'wandb_mode', 'disabled').lower()
+    os.environ['WANDB_MODE'] = wandb_mode
+    if wandb_mode != 'disabled':
         from lightning.pytorch.loggers import WandbLogger
 
-        wandb_run_id = getattr(cfg, "wandb_run_id", None)
+        wandb_run_id = getattr(cfg, 'wandb_run_id', None)
         wandb_logger = WandbLogger(
             project=cfg.wb_pname,
             entity=cfg.entity,
             config=vars(cfg),
             id=wandb_run_id,
-            resume="allow" if wandb_run_id else None,
+            resume='allow' if wandb_run_id else None,
         )
     else:
         wandb_logger = None
 
-    ckpt_path = Path(getattr(cfg, "ckpt_path", "./checkpoints"))
+    ckpt_path = Path(getattr(cfg, 'ckpt_path', './checkpoints'))
+    monitor = getattr(cfg, 'checkpoint_monitor', 'val_loss')
+    mode = getattr(cfg, 'checkpoint_mode', 'min')
     checkpoint_cb = ModelCheckpoint(
         dirpath=ckpt_path,
-        monitor="val_loss",
+        monitor=monitor,
         save_top_k=2,
-        mode="min",
-        filename="ckpt_{epoch:02d}_{val_loss:.6f}",
+        mode=mode,
+        filename=f'ckpt_{{epoch:02d}}_{{{monitor}:.6f}}',
         save_last=True,
     )
 
-    lr_monitor = LearningRateMonitor(logging_interval="epoch")
+    lr_monitor = LearningRateMonitor(logging_interval='epoch')
 
     # -----------------------------
     # Trainer
     # -----------------------------
     local_world_size = int(
-        os.environ.get("LOCAL_WORLD_SIZE", torch.cuda.device_count())
+        os.environ.get('LOCAL_WORLD_SIZE', torch.cuda.device_count())
     )
-    world_size = int(os.environ.get("WORLD_SIZE", local_world_size))
+    world_size = int(os.environ.get('WORLD_SIZE', local_world_size))
     num_nodes = max(1, world_size // local_world_size)
     trainer = Trainer(
         max_epochs=int(cfg.epochs),
         logger=wandb_logger,
         callbacks=[checkpoint_cb, lr_monitor],
-        accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        accelerator='gpu' if torch.cuda.is_available() else 'cpu',
         precision=cfg.precision,
-        devices="auto",
+        devices='auto',
         num_nodes=num_nodes,
-        strategy="ddp",
+        strategy='ddp',
         log_every_n_steps=1,
-        gradient_clip_val=getattr(cfg, "gradient_clip_value", 1.0),
+        gradient_clip_val=getattr(cfg, 'gradient_clip_value', 1.0),
     )
 
     # -----------------------------
     # Train
     # -----------------------------
-    ckpt = ckpt_path / "last.ckpt"
+    ckpt = ckpt_path / 'last.ckpt'
     trainer.fit(
         lit_model, datamodule=datamodule, ckpt_path=ckpt if ckpt.exists() else None
     )

@@ -9,6 +9,7 @@ from hydra.utils import instantiate
 from lightning.pytorch import Trainer
 
 from electrai.lightning import LightningGenerator
+from electrai.lightning_flow import LightningFlowMatch
 
 
 def test(args):
@@ -28,32 +29,35 @@ def test(args):
     # -----------------------------
     # Model (LightningModule handles architecture + loss + optimizer)
     # -----------------------------
-    lit_model = LightningGenerator(cfg)
-    lit_model.test_cfg = SimpleNamespace(log_dir=cfg.log_dir, out_dir=cfg.out_dir)
+    training_mode = getattr(cfg, 'training_mode', 'default')
+    if training_mode == 'flow_match':
+        lit_model = LightningFlowMatch(cfg)
+    else:
+        lit_model = LightningGenerator(cfg)
 
     # -----------------------------
     # Callback
     # -----------------------------
-    ckpt_path = Path(getattr(cfg, "ckpt_path", "./checkpoints"))
+    ckpt_path = Path(getattr(cfg, 'ckpt_path', './checkpoints'))
 
     # -----------------------------
     # Trainer
     # -----------------------------
     if cfg.save_pred:
-        out_dir = Path(getattr(cfg, "out_dir", "predictions"))
+        out_dir = Path(getattr(cfg, 'out_dir', 'predictions'))
         out_dir.mkdir(exist_ok=True, parents=True)
     else:
         out_dir = None
-    log_dir = Path(getattr(cfg, "log_dir", "logs"))
-    tmp_dir = log_dir / "tmp"
+    log_dir = Path(getattr(cfg, 'log_dir', 'logs'))
+    tmp_dir = log_dir / 'tmp'
     for directory in [log_dir, tmp_dir]:
         directory.mkdir(exist_ok=True, parents=True)
     trainer = Trainer(
         logger=None,
         callbacks=None,
-        accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        accelerator='gpu' if torch.cuda.is_available() else 'cpu',
         devices=1,
-        precision=cfg.model_precision,
+        precision=getattr(cfg, 'model_precision', getattr(cfg, 'precision', 32)),
     )
 
     lit_model.test_cfg = SimpleNamespace(
@@ -61,10 +65,10 @@ def test(args):
     )
 
     # -----------------------------
-    # Train
+    # Test
     # -----------------------------
-    ckpt = ckpt_path / "last.ckpt"
+    ckpt = ckpt_path / 'last.ckpt'
     if not ckpt.exists():
-        raise FileNotFoundError(f"Checkpoint not found: {ckpt}")
+        raise FileNotFoundError(f'Checkpoint not found: {ckpt}')
 
     trainer.test(model=lit_model, datamodule=datamodule, ckpt_path=ckpt)

@@ -7,5 +7,8 @@ def collate_fn(batch):
     try:
         return default_collate(batch)
     except RuntimeError:
+        if batch and isinstance(batch[0], dict):
+            return {key: [sample[key] for sample in batch] for key in batch[0]}
+
         x, y, index = zip(*batch, strict=True)
-        return list(x), list(y), list(index)
+        return {"data": list(x), "label": list(y), "index": list(index)}
