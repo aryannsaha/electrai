@@ -11,7 +11,6 @@ from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 
 from electrai.lightning import LightningGenerator
-from electrai.lightning_flow import LightningFlowMatch
 
 
 def train(args):
@@ -31,11 +30,7 @@ def train(args):
     # -----------------------------
     # Model (LightningModule handles architecture + loss + optimizer)
     # -----------------------------
-    training_mode = getattr(cfg, 'training_mode', 'default')
-    if training_mode == 'flow_match':
-        lit_model = LightningFlowMatch(cfg)
-    else:
-        lit_model = LightningGenerator(cfg)
+    lit_model = LightningGenerator(cfg)
 
     # -----------------------------
     # Logging and callbacks
@@ -57,7 +52,7 @@ def train(args):
         wandb_logger = None
 
     ckpt_path = Path(getattr(cfg, 'ckpt_path', './checkpoints'))
-    monitor = getattr(cfg, 'checkpoint_monitor', 'val_loss')
+    monitor = getattr(cfg, 'checkpoint_monitor', 'val_nmae')
     mode = getattr(cfg, 'checkpoint_mode', 'min')
     checkpoint_cb = ModelCheckpoint(
         dirpath=ckpt_path,

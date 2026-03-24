@@ -42,6 +42,8 @@ wb_pname: mp-experiment
 
 # checkpoints
 ckpt_path: ./checkpoints
+checkpoint_monitor: val_nmae
+checkpoint_mode: min
 
 # test the model
 # save_pred: true

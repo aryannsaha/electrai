@@ -23,24 +23,61 @@ class LightningGenerator(LightningModule):
     def forward(self, x):
         return self.model(x)
 
+    def _infer_batch_size(self, batch) -> int:
+        x = batch["data"]
+        if isinstance(x, list):
+            return len(x)
+        return int(x.shape[0])
+
+    def _metrics_from_batch(self, batch):
+        nmae = self._loss_calculation(batch)
+        return {"loss": nmae, "nmae": nmae}
+
     def training_step(self, batch):
-        loss = self._loss_calculation(batch)
+        metrics = self._metrics_from_batch(batch)
+        batch_size = self._infer_batch_size(batch)
         self.log(
             "train_loss",
-            loss,
+            metrics["loss"],
+            prog_bar=False,
+            on_step=True,
+            on_epoch=True,
+            sync_dist=False,
+            batch_size=batch_size,
+        )
+        self.log(
+            "train_nmae",
+            metrics["nmae"],
             prog_bar=True,
             on_step=True,
             on_epoch=True,
             sync_dist=False,
+            batch_size=batch_size,
         )
-        return loss
+        return metrics["loss"]
 
     def validation_step(self, batch):
-        loss = self._loss_calculation(batch)
+        metrics = self._metrics_from_batch(batch)
+        batch_size = self._infer_batch_size(batch)
         self.log(
-            "val_loss", loss, prog_bar=True, on_step=True, on_epoch=True, sync_dist=True
+            "val_loss",
+            metrics["loss"],
+            prog_bar=False,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+            batch_size=batch_size,
         )
-        return loss
+        self.log(
+            "val_nmae",
+            metrics["nmae"],
+            prog_bar=True,
+            on_step=False,
+            on_epoch=True,
+            sync_dist=True,
+            batch_size=batch_size,
+        )
+        return metrics["loss"]
 
     def _loss_calculation(self, batch):
         x = batch["data"]

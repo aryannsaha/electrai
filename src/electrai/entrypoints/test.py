@@ -9,7 +9,6 @@ from hydra.utils import instantiate
 from lightning.pytorch import Trainer
 
 from electrai.lightning import LightningGenerator
-from electrai.lightning_flow import LightningFlowMatch
 
 
 def test(args):
@@ -29,11 +28,7 @@ def test(args):
     # -----------------------------
     # Model (LightningModule handles architecture + loss + optimizer)
     # -----------------------------
-    training_mode = getattr(cfg, 'training_mode', 'default')
-    if training_mode == 'flow_match':
-        lit_model = LightningFlowMatch(cfg)
-    else:
-        lit_model = LightningGenerator(cfg)
+    lit_model = LightningGenerator(cfg)
 
     # -----------------------------
     # Callback
