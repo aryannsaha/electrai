@@ -24,6 +24,30 @@ def load_cfg_from_checkpoint(checkpoint_path: Path):
     raise ValueError("Could not find a config inside the checkpoint or a sibling config.yaml.")
 
 
+def resolve_torch_device(device: str | torch.device | None) -> torch.device:
+    if isinstance(device, torch.device):
+        return device
+
+    requested = "auto" if device is None else str(device).strip().lower()
+    if requested in {"auto", ""}:
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+    if requested == "gpu":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return torch.device("mps")
+        raise RuntimeError("Requested a GPU device, but neither CUDA nor MPS is available.")
+    if requested.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError(f"Requested device '{device}', but CUDA is not available.")
+    if requested.startswith("mps") and not (hasattr(torch.backends, "mps") and torch.backends.mps.is_available()):
+        raise RuntimeError(f"Requested device '{device}', but MPS is not available.")
+    return torch.device(device)
+
+
 def to_batched_volume(tensor, device: torch.device) -> torch.Tensor:
     tensor = torch.as_tensor(tensor)
     if tensor.ndim == 3:
@@ -62,10 +86,17 @@ def plot_slices(
 ):
     import matplotlib.pyplot as plt
 
-    titles = {"noise": "Gaussian Noise", "condition": "Condition", "label": "Label", "output": f"Final Output\nNMAE={nmae:.4f}"}
-    fig, axes = plt.subplots(1, 4, figsize=(18, 4.5), constrained_layout=True)
+    keys = ("noise", "condition", "label", "output", "residual")
+    titles = {
+        "noise": "Gaussian Noise",
+        "condition": "Condition",
+        "label": "Label",
+        "output": f"Final Output\nNMAE={nmae:.4f}",
+        "residual": "Residual\nOutput - Label",
+    }
+    fig, axes = plt.subplots(1, len(keys), figsize=(22, 4.5), constrained_layout=True)
     slice_meta: dict[str, int] = {}
-    for ax, key in zip(axes, ("noise", "condition", "label", "output"), strict=True):
+    for ax, key in zip(axes, keys, strict=True):
         slice_2d, axis_name, used_index, xlabel, ylabel = select_slice(volumes[key], plane, slice_index, slice_frac)
         slice_meta[key] = used_index
         finite = slice_2d[np.isfinite(slice_2d)]
@@ -106,7 +137,7 @@ def visualize_qm9_checkpoint_sample(
     checkpoint_path = Path(checkpoint_path)
     split_path = Path(split_file) if split_file is not None else None
     save_path = Path(output_path) if output_path is not None else None
-    torch_device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+    torch_device = resolve_torch_device(device)
 
     cfg = load_cfg_from_checkpoint(checkpoint_path)
     if not hasattr(cfg, "data"):
@@ -185,8 +216,9 @@ def visualize_qm9_checkpoint_sample(
     from electrai.model.loss.charge import NormMAE
 
     nmae = NormMAE()(output, label).item()
+    residual = output - label
     volumes: dict[str, np.ndarray] = {}
-    for key, tensor in {"noise": noise, "condition": condition, "label": label, "output": output}.items():
+    for key, tensor in {"noise": noise, "condition": condition, "label": label, "output": output, "residual": residual}.items():
         array = tensor.detach().cpu().float().numpy()
         while array.ndim > 3:
             array = array[0]
@@ -212,6 +244,7 @@ def visualize_qm9_checkpoint_sample(
         "sample_id": str(sample_id),
         "sample_idx": chosen_idx,
         "module_type": module_type,
+        "device": str(torch_device),
         "plane": plane,
         "slice_indices": slice_meta,
         "nmae": nmae,
@@ -219,5 +252,6 @@ def visualize_qm9_checkpoint_sample(
         "condition": condition.detach().cpu(),
         "label": label.detach().cpu(),
         "output": output.detach().cpu(),
+        "residual": residual.detach().cpu(),
         "output_path": save_path,
     }
