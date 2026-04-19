@@ -145,9 +145,9 @@ class RhoData(Dataset):
         nz = nz // ds1 * ds1
         data = data[..., :nx:ds1,:ny:ds1,:nz:ds1]
         nx, ny, nz = label.shape[-3:]
-        nx = nx // ds1 * ds1
-        ny = ny // ds1 * ds1
-        nz = nz // ds1 * ds1
+        nx = nx // ds2 * ds2
+        ny = ny // ds2 * ds2
+        nz = nz // ds2 * ds2
         label = label[..., :nx:ds2,:ny:ds2,:nz:ds2]
 
         data = data.unsqueeze(0)

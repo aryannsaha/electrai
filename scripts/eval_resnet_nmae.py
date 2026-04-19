@@ -43,7 +43,8 @@ def main():
 
     # Load model from checkpoint
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    lit_model = LightningGenerator.load_from_checkpoint(args.ckpt, cfg=cfg)
+    lit_model = LightningGenerator.load_from_checkpoint(args.ckpt, map_location="cpu", cfg=cfg)
+    lit_model.requires_grad_(False)
     lit_model = lit_model.to(device)
     lit_model.eval()
 

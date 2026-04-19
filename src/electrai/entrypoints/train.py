@@ -12,6 +12,16 @@ from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 
 from electrai.lightning import LightningGenerator
 from electrai.lightning_flow import LightningFlowMatch
+from electrai.lightning_flow_cond_aug import LightningFlowMatchCondAug
+from electrai.lightning_flow_pretrained_cond import LightningFlowMatchPretrainedCond
+from electrai.lightning_flow_reflow import LightningFlowMatchReflow
+from electrai.lightning_flow_residual import LightningFlowMatchResidual
+from electrai.lightning_flow_residual_displacement import (
+    LightningFlowMatchResidualDisplacement,
+)
+from electrai.lightning_flow_test import LightningFlowTest
+from electrai.lightning_w_time import LightningGenerator as LightningGeneratorWithTime
+from electrai.lightning_w_time_flow import LightningGenerator as LightningGeneratorFlowWithTime
 
 
 def train(args):
@@ -34,8 +44,49 @@ def train(args):
     training_mode = getattr(cfg, 'training_mode', 'default')
     if training_mode == 'flow_match':
         lit_model = LightningFlowMatch(cfg)
+    elif training_mode == 'flow_match_reflow':
+        lit_model = LightningFlowMatchReflow(cfg)
+    elif training_mode == 'flow_match_residual':
+        lit_model = LightningFlowMatchResidual(cfg)
+    elif training_mode == 'flow_match_residual_displacement':
+        lit_model = LightningFlowMatchResidualDisplacement(cfg)
+    elif training_mode == 'flow_match_cond_aug':
+        lit_model = LightningFlowMatchCondAug(cfg)
+    elif training_mode == 'flow_match_pretrained_cond':
+        lit_model = LightningFlowMatchPretrainedCond(cfg)
+    elif training_mode == 'flow_match_test':
+        lit_model = LightningFlowTest(cfg)
+    elif training_mode == 'regression_with_time':
+        lit_model = LightningGeneratorWithTime(cfg)
+    elif training_mode == 'flow_match_with_time':
+        lit_model = LightningGeneratorFlowWithTime(cfg)
     else:
         lit_model = LightningGenerator(cfg)
+
+    ckpt_path = Path(getattr(cfg, 'ckpt_path', './checkpoints'))
+
+    # -----------------------------
+    # Weight initialization from pretrained checkpoint
+    # -----------------------------
+    pretrain_ckpt = getattr(cfg, "pretrain_ckpt_path", None)
+    if pretrain_ckpt and Path(pretrain_ckpt).exists() and not (ckpt_path / 'last.ckpt').exists():
+        # Pretraining checkpoints are trusted local artifacts and may contain
+        # metadata objects such as SimpleNamespace in addition to tensor weights.
+        ckpt_data = torch.load(
+            pretrain_ckpt,
+            map_location="cpu",
+            weights_only=False,
+        )
+        state_dict = ckpt_data.get("state_dict", ckpt_data)
+        if not isinstance(state_dict, dict):
+            raise TypeError(
+                "Expected a checkpoint dict or raw state_dict, got "
+                f"{type(state_dict)!r} from {pretrain_ckpt}."
+            )
+        missing, unexpected = lit_model.load_state_dict(state_dict, strict=False)
+        print(f"Loaded pretrained weights from {pretrain_ckpt}")
+        print(f"  Missing keys:    {len(missing)}")
+        print(f"  Unexpected keys: {len(unexpected)}")
 
     # -----------------------------
     # Logging and callbacks
@@ -55,14 +106,12 @@ def train(args):
         )
     else:
         wandb_logger = None
-
-    ckpt_path = Path(getattr(cfg, 'ckpt_path', './checkpoints'))
     monitor = getattr(cfg, 'checkpoint_monitor', 'val_loss')
     mode = getattr(cfg, 'checkpoint_mode', 'min')
     checkpoint_cb = ModelCheckpoint(
         dirpath=ckpt_path,
         monitor=monitor,
-        save_top_k=2,
+        save_top_k=5,
         mode=mode,
         filename=f'ckpt_{{epoch:02d}}_{{{monitor}:.6f}}',
         save_last=True,

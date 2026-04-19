@@ -8,7 +8,6 @@ from torch.utils.checkpoint import checkpoint
 
 class ResBlock3D(nn.Module):
     def __init__(self, cin, cout, k, use_checkpoint=True):
-        #cin -> channels in, cout -> channels out, k -> kernel size
         super().__init__()
         self.use_checkpoint = use_checkpoint
         self.conv_block = nn.Sequential(

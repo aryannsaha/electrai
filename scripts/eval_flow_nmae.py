@@ -24,6 +24,10 @@ from hydra.utils import instantiate
 
 from electrai.lightning_flow import LightningFlowMatch
 from electrai.model.loss.charge import NormMAE
+from electrai.lightning_flow_cond_aug import LightningFlowMatchCondAug
+from electrai.lightning_flow_pretrained_cond import LightningFlowMatchPretrainedCond
+from electrai.lightning_flow_reflow import LightningFlowMatchReflow
+from electrai.lightning_flow_residual import LightningFlowMatchResidual
 
 
 def main():
@@ -64,7 +68,22 @@ def main():
 
     # Load model from checkpoint
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    lit_model = LightningFlowMatch.load_from_checkpoint(args.ckpt, cfg=cfg)
+    training_mode = str(getattr(cfg, "training_mode", "flow_match")).lower()
+    if training_mode == "flow_match":
+        model_cls = LightningFlowMatch
+    elif training_mode == "flow_match_reflow":
+        model_cls = LightningFlowMatchReflow
+    elif training_mode == "flow_match_residual":
+        model_cls = LightningFlowMatchResidual
+    elif training_mode == "flow_match_cond_aug":
+        model_cls = LightningFlowMatchCondAug
+    elif training_mode == "flow_match_pretrained_cond":
+        model_cls = LightningFlowMatchPretrainedCond
+    else:
+        raise ValueError(f"Unsupported training_mode for flow eval: {training_mode}")
+
+    lit_model = model_cls.load_from_checkpoint(args.ckpt, map_location="cpu", cfg=cfg)
+    lit_model.requires_grad_(False)
     lit_model = lit_model.to(device)
     lit_model.eval()
 

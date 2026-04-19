@@ -24,6 +24,7 @@ import time
 import numpy as np
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 from hydra.utils import instantiate
 from lightning.pytorch import LightningModule
 
@@ -54,8 +55,207 @@ class LightningFlowMatch(LightningModule):
         self.ema_model = copy.deepcopy(self.model)
         self.ema_model.requires_grad_(False)
 
+        # The baseline flow model still defaults to a standard Gaussian source.
+        # The ablation experiments can opt into a condition-informed source by
+        # switching these config values in their experiment-specific YAML files.
+        self.source_distribution = getattr(
+            cfg, 'source_distribution', 'standard_gaussian',
+        ).lower()
+        self.source_mean_scale = float(getattr(cfg, 'source_mean_scale', 0.0))
+        self.source_noise_base_std = float(getattr(cfg, 'source_noise_base_std', 1.0))
+        self.source_noise_cond_scale = float(getattr(cfg, 'source_noise_cond_scale', 0.0))
+        self.source_noise_power = float(getattr(cfg, 'source_noise_power', 0.5))
+        self.source_noise_blur_kernel = int(getattr(cfg, 'source_noise_blur_kernel', 1))
+        self.source_noise_eps = float(getattr(cfg, 'source_noise_eps', 1e-8))
+        self.density_projection = getattr(
+            cfg, 'density_projection', 'none',
+        ).lower()
+        self.density_floor = float(getattr(cfg, 'density_floor', 0.0))
+        self.density_softplus_beta = float(
+            getattr(cfg, 'density_softplus_beta', 4.0),
+        )
+
     def forward(self, x: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
         return self.model(x, t)
+
+    # ---------------------------------------------------------------------
+    # Extensibility hooks
+    #
+    # The three ablations in this repo all share the same optimizer, logging,
+    # EMA handling, and test loop. To keep those pieces aligned, the base flow
+    # module exposes a few focused hooks that child classes can override.
+    # ---------------------------------------------------------------------
+
+    def _condition_for_model(self, cond: torch.Tensor, *, stage: str) -> torch.Tensor:
+        """Return the conditioning tensor presented to the model.
+
+        The baseline model always uses the clean SAD guess. The conditioning
+        augmentation ablation overrides this hook during training.
+        """
+        return cond
+
+    def _target_state(self, cond: torch.Tensor, x_1: torch.Tensor) -> torch.Tensor:
+        """Return the state variable whose flow we model.
+
+        The default formulation models the full density directly. The residual
+        ablation overrides this to model `(target - condition)` instead.
+        """
+        return x_1
+
+    def _prediction_from_state(
+        self, state: torch.Tensor, cond: torch.Tensor,
+    ) -> torch.Tensor:
+        """Map the flow state back to a physical density prediction."""
+        del cond
+        if self.density_projection in {'identity', 'none'}:
+            return state
+        if self.density_projection == 'clamp':
+            return state.clamp_min(self.density_floor)
+        if self.density_projection == 'softplus':
+            shifted = state - self.density_floor
+            return (
+                F.softplus(shifted, beta=self.density_softplus_beta)
+                + self.density_floor
+            )
+
+        raise ValueError(
+            f'Unknown density_projection={self.density_projection!r}. '
+            "Expected 'none', 'clamp', or 'softplus'.",
+        )
+
+    def _reference_state_from_condition(self, cond: torch.Tensor) -> torch.Tensor:
+        """Return a tensor with the right shape for source-state sampling.
+
+        In the default formulation the source state lives in the same space as
+        the target density, which already matches the conditioning tensor shape
+        for the current QM9 flow setups.
+        """
+        return cond
+
+    def _default_sampling_model(self, *, stage: str):
+        """Choose the rollout network for inference-like stages.
+
+        Validation already has an explicit `val_use_ema` switch. Test-time and
+        ad hoc sampling should default to the same choice unless the config
+        overrides them separately.
+        """
+        stage = stage.lower()
+        if stage == 'validation_rollout':
+            use_ema = self.val_use_ema
+        elif stage == 'test':
+            use_ema = bool(getattr(self.cfg, 'test_use_ema', self.val_use_ema))
+        else:
+            use_ema = bool(getattr(self.cfg, 'sample_use_ema', self.val_use_ema))
+        return self.ema_model if use_ema else self.model
+
+    # ---------------------------------------------------------------------
+    # Source distribution helpers
+    # ---------------------------------------------------------------------
+
+    def _normalized_guidance_map(
+        self,
+        cond: torch.Tensor,
+        *,
+        blur_kernel: int,
+        eps: float,
+    ) -> torch.Tensor:
+        """Build a smooth per-voxel guidance map from the conditioning density.
+
+        This map is intentionally normalized per-sample so the scale controls in
+        the config remain interpretable across molecules with different total
+        charge magnitudes.
+        """
+        guide = cond.clamp_min(0.0)
+
+        kernel = max(1, int(blur_kernel))
+        if kernel % 2 == 0:
+            kernel += 1
+        if kernel > 1:
+            guide = torch.nn.functional.avg_pool3d(
+                guide,
+                kernel_size=kernel,
+                stride=1,
+                padding=kernel // 2,
+            )
+
+        flat = guide.flatten(start_dim=1)
+        scale = flat.amax(dim=1, keepdim=True).clamp_min(eps)
+        return guide / scale.view(-1, 1, 1, 1, 1)
+
+    def _density_guided_std_map(
+        self,
+        cond: torch.Tensor,
+        *,
+        base_std: float,
+        guided_scale: float,
+        power: float,
+        blur_kernel: int,
+        eps: float,
+    ) -> torch.Tensor:
+        """Convert a conditioning density into a spatially varying std map."""
+        guidance = self._normalized_guidance_map(
+            cond,
+            blur_kernel=blur_kernel,
+            eps=eps,
+        )
+        std_map = base_std + guided_scale * guidance.pow(power)
+        return std_map.to(device=cond.device, dtype=cond.dtype)
+
+    def _sample_source_state(
+        self,
+        cond: torch.Tensor,
+        *,
+        reference_state: torch.Tensor,
+    ) -> torch.Tensor:
+        """Sample the source state used by flow matching.
+
+        By default this is the usual standard Gaussian source. The change-1
+        ablation switches `source_distribution` to `conditioned_gaussian`, which
+        recent conditional diffusion/flow papers motivate as a better aligned
+        source when the condition already contains meaningful low-frequency
+        structure.
+        """
+        if self.source_distribution in {'standard', 'gaussian', 'standard_gaussian'}:
+            return torch.randn_like(reference_state)
+
+        if self.source_distribution in {
+            'condition',
+            'condition_only',
+            'deterministic_condition',
+            'sad',
+            'sad_guess',
+        }:
+            if cond.shape != reference_state.shape:
+                raise ValueError(
+                    'Condition-only source sampling requires the condition and '
+                    f'state to share a shape, got {tuple(cond.shape)} and '
+                    f'{tuple(reference_state.shape)}.',
+                )
+            return self.source_mean_scale * cond
+
+        if self.source_distribution in {'conditioned', 'conditioned_gaussian'}:
+            if cond.shape != reference_state.shape:
+                raise ValueError(
+                    'Condition-informed source sampling requires the condition and '
+                    f'state to share a shape, got {tuple(cond.shape)} and '
+                    f'{tuple(reference_state.shape)}.',
+                )
+            std_map = self._density_guided_std_map(
+                cond,
+                base_std=self.source_noise_base_std,
+                guided_scale=self.source_noise_cond_scale,
+                power=self.source_noise_power,
+                blur_kernel=self.source_noise_blur_kernel,
+                eps=self.source_noise_eps,
+            )
+            noise = torch.randn_like(reference_state)
+            return self.source_mean_scale * cond + std_map * noise
+
+        raise ValueError(
+            f'Unknown source_distribution={self.source_distribution!r}. '
+            "Expected 'standard_gaussian', 'condition_only', or "
+            "'conditioned_gaussian'.",
+        )
 
     def _infer_batch_size(self, batch) -> int:
         data = batch['data']
@@ -87,21 +287,53 @@ class LightningFlowMatch(LightningModule):
             for key in metrics_list[0]
         }
 
-    def _objective_terms(self, cond: torch.Tensor, x_1: torch.Tensor):
+    def _log_extra_metrics(
+        self,
+        prefix: str,
+        metrics: dict[str, torch.Tensor],
+        *,
+        skip: set[str],
+        batch_size: int,
+        on_step: bool,
+        on_epoch: bool,
+    ) -> None:
+        """Log any subclass-provided metrics without hard-coding their names."""
+        for name, value in metrics.items():
+            if name in skip:
+                continue
+            self.log(
+                f'{prefix}_{name}',
+                value,
+                on_step=on_step,
+                on_epoch=on_epoch,
+                sync_dist=True,
+                batch_size=batch_size,
+            )
+
+    def _objective_terms(
+        self,
+        cond: torch.Tensor,
+        x_1: torch.Tensor,
+        *,
+        stage: str,
+    ):
         bsz = x_1.shape[0]
         device = x_1.device
 
-        x_0 = torch.randn_like(x_1)
+        model_cond = self._condition_for_model(cond, stage=stage)
+        target_state = self._target_state(cond, x_1)
+        x_0 = self._sample_source_state(cond, reference_state=target_state)
         t = torch.rand(bsz, device=device) * (1.0 - self.eps) + self.eps
         t_expand = t.view(bsz, 1, 1, 1, 1)
-        z_t = t_expand * x_1 + (1.0 - t_expand) * x_0
-        target = x_1 - x_0
+        z_t = t_expand * target_state + (1.0 - t_expand) * x_0
+        target = target_state - x_0
 
-        model_input = torch.cat([z_t, cond], dim=1)
+        model_input = torch.cat([z_t, model_cond], dim=1)
         v_pred = self.model(model_input, t)
 
         flow_mse = ((v_pred - target) ** 2).mean()
-        x_1_hat = z_t + (1.0 - t_expand) * v_pred
+        state_hat = z_t + (1.0 - t_expand) * v_pred
+        x_1_hat = self._prediction_from_state(state_hat, cond)
         endpoint_nmae = self.nmae_loss(x_1_hat, x_1)
         endpoint_mass = self.mass_loss(x_1_hat, x_1)
 
@@ -117,15 +349,15 @@ class LightningFlowMatch(LightningModule):
             'endpoint_mass': endpoint_mass,
         }
 
-    def _objective_from_batch(self, batch):
+    def _objective_from_batch(self, batch, *, stage: str):
         metrics = [
-            self._objective_terms(cond, target)
+            self._objective_terms(cond, target, stage=stage)
             for cond, target, _index in self._iter_batch_samples(batch)
         ]
         return self._mean_metrics(metrics)
 
     def training_step(self, batch):
-        metrics = self._objective_from_batch(batch)
+        metrics = self._objective_from_batch(batch, stage='train')
         batch_size = self._infer_batch_size(batch)
         self.log(
             'train_loss', metrics['loss'],
@@ -144,15 +376,24 @@ class LightningFlowMatch(LightningModule):
             'train_endpoint_mass', metrics['endpoint_mass'],
             on_step=True, on_epoch=True, sync_dist=True, batch_size=batch_size,
         )
+        self._log_extra_metrics(
+            'train',
+            metrics,
+            skip={'loss', 'flow_mse', 'endpoint_nmae', 'endpoint_mass'},
+            batch_size=batch_size,
+            on_step=True,
+            on_epoch=True,
+        )
         return metrics['loss']
 
     def validation_step(self, batch):
-        objective_metrics = self._objective_from_batch(batch)
+        objective_metrics = self._objective_from_batch(batch, stage='validation')
         rollout_metrics = self._rollout_metrics_from_batch(
             batch,
             model=self.ema_model if self.val_use_ema else self.model,
             n_steps=self.val_rollout_steps,
             solver=self.sample_solver,
+            stage='validation_rollout',
         )
         batch_size = self._infer_batch_size(batch)
 
@@ -182,6 +423,14 @@ class LightningFlowMatch(LightningModule):
             'val_rollout_mass', rollout_metrics['rollout_mass'],
             on_step=False, on_epoch=True, sync_dist=True, batch_size=batch_size,
         )
+        self._log_extra_metrics(
+            'val',
+            objective_metrics,
+            skip={'loss', 'flow_mse', 'endpoint_nmae', 'endpoint_mass'},
+            batch_size=batch_size,
+            on_step=False,
+            on_epoch=True,
+        )
         return objective_metrics['loss']
 
     def _predict_velocity(self, model, x: torch.Tensor, cond: torch.Tensor, t: torch.Tensor):
@@ -189,7 +438,16 @@ class LightningFlowMatch(LightningModule):
         return model(model_input, t)
 
     @torch.no_grad()
-    def _sample_impl(self, cond: torch.Tensor, *, model, n_steps: int, solver: str) -> torch.Tensor:
+    def _sample_state_impl(
+        self,
+        cond: torch.Tensor,
+        *,
+        model,
+        n_steps: int,
+        solver: str,
+        stage: str,
+        initial_state: torch.Tensor | None = None,
+    ) -> torch.Tensor:
         solver = solver.lower()
         if solver not in {'euler', 'heun'}:
             raise ValueError(f'Unknown solver: {solver}')
@@ -197,10 +455,15 @@ class LightningFlowMatch(LightningModule):
         model_was_training = model.training
         model.eval()
 
-        x = torch.randn(
-            cond.shape[0], 1, *cond.shape[2:],
-            device=cond.device, dtype=cond.dtype,
-        )
+        model_cond = self._condition_for_model(cond, stage=stage)
+
+        if initial_state is None:
+            x = self._sample_source_state(
+                cond,
+                reference_state=self._reference_state_from_condition(cond),
+            )
+        else:
+            x = initial_state.to(device=cond.device, dtype=cond.dtype)
         t_schedule = torch.linspace(
             self.eps, 1.0, n_steps + 1, device=cond.device, dtype=cond.dtype,
         )
@@ -212,7 +475,7 @@ class LightningFlowMatch(LightningModule):
             t_batch = torch.full(
                 (cond.shape[0],), t_cur, device=cond.device, dtype=cond.dtype,
             )
-            v_cur = self._predict_velocity(model, x, cond, t_batch)
+            v_cur = self._predict_velocity(model, x, model_cond, t_batch)
 
             if solver == 'euler':
                 x = x + v_cur * dt
@@ -222,7 +485,7 @@ class LightningFlowMatch(LightningModule):
             t_next_batch = torch.full(
                 (cond.shape[0],), t_next, device=cond.device, dtype=cond.dtype,
             )
-            v_next = self._predict_velocity(model, x_euler, cond, t_next_batch)
+            v_next = self._predict_velocity(model, x_euler, model_cond, t_next_batch)
             x = x + 0.5 * dt * (v_cur + v_next)
 
         if model_was_training:
@@ -237,18 +500,75 @@ class LightningFlowMatch(LightningModule):
         *,
         model=None,
         solver: str | None = None,
+        stage: str = 'sample',
     ) -> torch.Tensor:
         if n_steps is None:
             n_steps = self.n_sample_steps
         if model is None:
-            model = self.ema_model
+            model = self._default_sampling_model(stage=stage)
         if solver is None:
             solver = self.sample_solver
-        return self._sample_impl(cond, model=model, n_steps=n_steps, solver=solver)
+        state = self._sample_state_impl(
+            cond,
+            model=model,
+            n_steps=n_steps,
+            solver=solver,
+            stage=stage,
+        )
+        return self._prediction_from_state(state, cond)
+
+    @torch.no_grad()
+    def sample_state_from_source(
+        self,
+        cond: torch.Tensor,
+        source_state: torch.Tensor,
+        n_steps: int | None = None,
+        *,
+        model=None,
+        solver: str | None = None,
+        stage: str = 'sample',
+    ) -> torch.Tensor:
+        if n_steps is None:
+            n_steps = self.n_sample_steps
+        if model is None:
+            model = self._default_sampling_model(stage=stage)
+        if solver is None:
+            solver = self.sample_solver
+        return self._sample_state_impl(
+            cond,
+            model=model,
+            n_steps=n_steps,
+            solver=solver,
+            stage=stage,
+            initial_state=source_state,
+        )
+
+    @torch.no_grad()
+    def sample_from_source(
+        self,
+        cond: torch.Tensor,
+        source_state: torch.Tensor,
+        n_steps: int | None = None,
+        *,
+        model=None,
+        solver: str | None = None,
+        stage: str = 'sample',
+    ) -> torch.Tensor:
+        state = self.sample_state_from_source(
+            cond,
+            source_state,
+            n_steps=n_steps,
+            model=model,
+            solver=solver,
+            stage=stage,
+        )
+        return self._prediction_from_state(state, cond)
 
     @torch.no_grad()
     def sample_euler(self, cond: torch.Tensor, N: int | None = None) -> torch.Tensor:
-        return self.sample(cond, n_steps=N, model=self.ema_model, solver='euler')
+        return self.sample(
+            cond, n_steps=N, model=self.ema_model, solver='euler', stage='sample',
+        )
 
     @torch.no_grad()
     def _rollout_metrics(
@@ -259,17 +579,35 @@ class LightningFlowMatch(LightningModule):
         model,
         n_steps: int,
         solver: str,
+        stage: str,
     ):
-        preds = self.sample(cond, n_steps=n_steps, model=model, solver=solver)
+        preds = self.sample(
+            cond, n_steps=n_steps, model=model, solver=solver, stage=stage,
+        )
         return {
             'rollout_nmae': self.nmae_loss(preds, x_1),
             'rollout_mass': self.mass_loss(preds, x_1),
         }
 
     @torch.no_grad()
-    def _rollout_metrics_from_batch(self, batch, *, model, n_steps: int, solver: str):
+    def _rollout_metrics_from_batch(
+        self,
+        batch,
+        *,
+        model,
+        n_steps: int,
+        solver: str,
+        stage: str,
+    ):
         metrics = [
-            self._rollout_metrics(cond, target, model=model, n_steps=n_steps, solver=solver)
+            self._rollout_metrics(
+                cond,
+                target,
+                model=model,
+                n_steps=n_steps,
+                solver=solver,
+                stage=stage,
+            )
             for cond, target, _index in self._iter_batch_samples(batch)
         ]
         return self._mean_metrics(metrics)
@@ -316,13 +654,13 @@ class LightningFlowMatch(LightningModule):
             start = torch.cuda.Event(enable_timing=True)
             end = torch.cuda.Event(enable_timing=True)
             start.record()
-            preds = self.sample(cond)
+            preds = self.sample(cond, stage='test')
             end.record()
             torch.cuda.synchronize()
             elapsed = start.elapsed_time(end)
         else:
             start_time = time.perf_counter()
-            preds = self.sample(cond)
+            preds = self.sample(cond, stage='test')
             elapsed = (time.perf_counter() - start_time) * 1000.0
         return preds, elapsed
 

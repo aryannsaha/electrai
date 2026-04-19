@@ -10,6 +10,13 @@ from lightning.pytorch import Trainer
 
 from electrai.lightning import LightningGenerator
 from electrai.lightning_flow import LightningFlowMatch
+from electrai.lightning_flow_cond_aug import LightningFlowMatchCondAug
+from electrai.lightning_flow_pretrained_cond import LightningFlowMatchPretrainedCond
+from electrai.lightning_flow_reflow import LightningFlowMatchReflow
+from electrai.lightning_flow_residual import LightningFlowMatchResidual
+from electrai.lightning_flow_residual_displacement import (
+    LightningFlowMatchResidualDisplacement,
+)
 
 
 def test(args):
@@ -32,6 +39,16 @@ def test(args):
     training_mode = getattr(cfg, 'training_mode', 'default')
     if training_mode == 'flow_match':
         lit_model = LightningFlowMatch(cfg)
+    elif training_mode == 'flow_match_reflow':
+        lit_model = LightningFlowMatchReflow(cfg)
+    elif training_mode == 'flow_match_residual':
+        lit_model = LightningFlowMatchResidual(cfg)
+    elif training_mode == 'flow_match_residual_displacement':
+        lit_model = LightningFlowMatchResidualDisplacement(cfg)
+    elif training_mode == 'flow_match_cond_aug':
+        lit_model = LightningFlowMatchCondAug(cfg)
+    elif training_mode == 'flow_match_pretrained_cond':
+        lit_model = LightningFlowMatchPretrainedCond(cfg)
     else:
         lit_model = LightningGenerator(cfg)
 
