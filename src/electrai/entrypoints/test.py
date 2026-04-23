@@ -17,6 +17,9 @@ from electrai.lightning_flow_residual import LightningFlowMatchResidual
 from electrai.lightning_flow_residual_displacement import (
     LightningFlowMatchResidualDisplacement,
 )
+from electrai.lightning_w_time_flow_res import (
+    LightningGenerator as LightningGeneratorFlowWithTimeResidual,
+)
 
 
 def test(args):
@@ -49,6 +52,8 @@ def test(args):
         lit_model = LightningFlowMatchCondAug(cfg)
     elif training_mode == 'flow_match_pretrained_cond':
         lit_model = LightningFlowMatchPretrainedCond(cfg)
+    elif training_mode == 'flow_match_with_time_res':
+        lit_model = LightningGeneratorFlowWithTimeResidual(cfg)
     else:
         lit_model = LightningGenerator(cfg)
 

@@ -22,6 +22,9 @@ from electrai.lightning_flow_residual_displacement import (
 from electrai.lightning_flow_test import LightningFlowTest
 from electrai.lightning_w_time import LightningGenerator as LightningGeneratorWithTime
 from electrai.lightning_w_time_flow import LightningGenerator as LightningGeneratorFlowWithTime
+from electrai.lightning_w_time_flow_res import (
+    LightningGenerator as LightningGeneratorFlowWithTimeResidual,
+)
 
 
 def train(args):
@@ -60,6 +63,8 @@ def train(args):
         lit_model = LightningGeneratorWithTime(cfg)
     elif training_mode == 'flow_match_with_time':
         lit_model = LightningGeneratorFlowWithTime(cfg)
+    elif training_mode == 'flow_match_with_time_res':
+        lit_model = LightningGeneratorFlowWithTimeResidual(cfg)
     else:
         lit_model = LightningGenerator(cfg)
 
@@ -83,10 +88,18 @@ def train(args):
                 "Expected a checkpoint dict or raw state_dict, got "
                 f"{type(state_dict)!r} from {pretrain_ckpt}."
             )
-        missing, unexpected = lit_model.load_state_dict(state_dict, strict=False)
+        model_state = lit_model.state_dict()
+        filtered_state_dict = {
+            key: value
+            for key, value in state_dict.items()
+            if key in model_state and model_state[key].shape == value.shape
+        }
+        skipped = sorted(set(state_dict) - set(filtered_state_dict))
+        missing, unexpected = lit_model.load_state_dict(filtered_state_dict, strict=False)
         print(f"Loaded pretrained weights from {pretrain_ckpt}")
         print(f"  Missing keys:    {len(missing)}")
         print(f"  Unexpected keys: {len(unexpected)}")
+        print(f"  Skipped keys:    {len(skipped)}")
 
     # -----------------------------
     # Logging and callbacks

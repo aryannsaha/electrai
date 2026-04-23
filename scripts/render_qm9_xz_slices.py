@@ -102,6 +102,13 @@ def load_checkpoint_model_for_training_mode(
 
         model_cls = LightningGeneratorFlowWithTime
         module_type = "flow_with_time"
+    elif training_mode == "flow_match_with_time_res":
+        from electrai.lightning_w_time_flow_res import (
+            LightningGenerator as LightningGeneratorFlowWithTimeResidual,
+        )
+
+        model_cls = LightningGeneratorFlowWithTimeResidual
+        module_type = "flow_with_time_res"
     elif training_mode == "regression_with_time":
         from electrai.lightning_w_time import (
             LightningGenerator as LightningGeneratorWithTime,
@@ -374,21 +381,57 @@ def visualize_qm9_checkpoint_sample(
             if was_training:
                 rollout_model.train()
             sampler_label = f"{solver}, {model.n_sample_steps} steps"
-        elif module_type == "flow_with_time":
+        elif module_type in {"flow_with_time", "flow_with_time_res"}:
             if solver_override is not None and solver_override != "euler":
                 raise ValueError(
-                    "flow_match_with_time checkpoints currently support only "
+                    f"{training_mode} checkpoints currently support only "
                     f"the euler visualization rollout, got solver={solver_override!r}."
                 )
             if n_steps is not None:
                 model.n_inference_steps = int(n_steps)
 
-            source = condition.clone()
-            source_title = "Condition Source"
             model_cond = condition.clone()
+            if module_type == "flow_with_time_res":
+                fork_devices = list(range(torch.cuda.device_count())) if torch_device.type == "cuda" else []
+                with torch.random.fork_rng(devices=fork_devices):
+                    torch.manual_seed(noise_seed)
+                    if torch_device.type == "cuda":
+                        torch.cuda.manual_seed_all(noise_seed)
+                    source = model._sample_source_state(condition)
+                if str(getattr(model, "source_distribution", "")).lower() in {
+                    "zero",
+                    "zeros",
+                    "deterministic_zero",
+                }:
+                    source_title = "Zero Residual Source"
+                else:
+                    source_title = "Residual Source"
+                output_state = source.clone()
+                initial_model_input = torch.cat([output_state, model_cond], dim=1)
+            else:
+                source = condition.clone()
+                source_title = "Condition Source"
+                output_state = source.clone()
+                initial_model_input = output_state.clone()
             initial_state = source.clone()
-            initial_model_input = initial_state.clone()
-            output = model._sample(condition)
+
+            t_schedule = torch.linspace(
+                0.0,
+                1.0,
+                model.n_inference_steps + 1,
+                device=torch_device,
+                dtype=condition.dtype,
+            )
+            for t_cur, t_next in zip(t_schedule[:-1], t_schedule[1:], strict=True):
+                dt = t_next - t_cur
+                t_batch = t_cur.expand(condition.shape[0])
+                if module_type == "flow_with_time_res":
+                    y_hat = model(output_state, t_batch, cond=condition)
+                else:
+                    y_hat = model(output_state, t_batch)
+                denom = (1.0 - t_cur).clamp(min=model.eps)
+                output_state = output_state + dt * (y_hat - output_state) / denom
+            output = condition + output_state if module_type == "flow_with_time_res" else output_state
             sampler_label = f"euler, {model.n_inference_steps} steps"
         else:
             source = torch.randn(tuple(label.shape), generator=generator, dtype=torch.float32).to(device=torch_device, dtype=label.dtype)
@@ -460,7 +503,7 @@ def visualize_qm9_checkpoint_sample(
         "device": str(torch_device),
         "n_steps": getattr(model, "n_sample_steps", getattr(model, "n_inference_steps", None)),
         "plane": plane,
-        "solver": getattr(model, "sample_solver", "euler" if module_type == "flow_with_time" else None),
+        "solver": getattr(model, "sample_solver", "euler" if module_type in {"flow_with_time", "flow_with_time_res"} else None),
         "slice_indices": slice_meta,
         "nmae": nmae,
         "condition_nmae": condition_nmae,
