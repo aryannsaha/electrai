@@ -40,9 +40,21 @@ def train(args):
     if wandb_mode != "disabled":
         from lightning.pytorch.loggers import WandbLogger
 
-        wandb_logger = WandbLogger(
-            project=cfg.wb_pname, entity=cfg.entity, config=vars(cfg)
-        )
+        wandb_run_id = getattr(cfg, "wandb_run_id", None)
+        wandb_run_name = getattr(cfg, "wandb_run_name", None) or wandb_run_id
+        wandb_kwargs = {
+            "project": cfg.wb_pname,
+            "entity": cfg.entity,
+            "config": vars(cfg),
+        }
+        if wandb_run_id:
+            wandb_kwargs.update(
+                id=str(wandb_run_id),
+                name=str(wandb_run_name),
+                resume=getattr(cfg, "wandb_resume", "allow"),
+            )
+
+        wandb_logger = WandbLogger(**wandb_kwargs)
     else:
         wandb_logger = None
 
