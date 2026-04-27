@@ -215,6 +215,10 @@ class LightningGenerator(LightningModule):
             f"{self.source_distribution!r}. Expected 'zero' or 'zero_mean_gaussian'."
         )
 
+    def _zero_charge_residual(self, residual: torch.Tensor) -> torch.Tensor:
+        dims = tuple(range(1, residual.ndim))
+        return residual - residual.mean(dim=dims, keepdim=True)
+
     def _flow_loss(self, x_0: torch.Tensor, x_1: torch.Tensor) -> torch.Tensor:
         """X-prediction flow loss. Interpolates x_t between x (low-res) and y (high-res),
         then regresses the model output directly against y."""
@@ -230,6 +234,7 @@ class LightningGenerator(LightningModule):
         t_e = t.view(bsz, *([1] * (x_0.ndim - 1)))  # broadcast to match input tensor dims (B, 1, 1, 1,..)
         x_t = (1 - t_e) * x_0 + t_e * x_1  # linear interpolation low→high res
         y_hat = self(x_t, t, cond=cond)  # t is 1-dim tensor
+        y_hat = self._zero_charge_residual(y_hat)
         return self.loss_fn(y_hat, x_1), self.nmae_fn(y_hat, x_1)
 
     @torch.no_grad()
@@ -249,9 +254,10 @@ class LightningGenerator(LightningModule):
             dt = t_steps[i + 1] - t_cur
             t_batch = t_cur.expand(bsz)
             y_hat = self(x_t, t_batch, cond=x)
+            y_hat = self._zero_charge_residual(y_hat)
             denom = (1.0 - t_cur).clamp(min=self.eps)
             x_t = x_t + dt * (y_hat - x_t) / denom
-        return x + x_t
+        return x + self._zero_charge_residual(x_t)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(
