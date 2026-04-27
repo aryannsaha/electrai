@@ -235,7 +235,11 @@ class LightningGenerator(LightningModule):
         x_t = (1 - t_e) * x_0 + t_e * x_1  # linear interpolation low→high res
         y_hat = self(x_t, t, cond=cond)  # t is 1-dim tensor
         y_hat = self._zero_charge_residual(y_hat)
-        return self.loss_fn(y_hat, x_1), self.nmae_fn(y_hat, x_1)
+        if cond is None:
+            nmae = self.nmae_fn(y_hat, x_1)
+        else:
+            nmae = self.nmae_fn(cond + y_hat, cond + x_1)
+        return self.loss_fn(y_hat, x_1), nmae
 
     @torch.no_grad()
     def _sample(self, x: torch.Tensor) -> torch.Tensor:

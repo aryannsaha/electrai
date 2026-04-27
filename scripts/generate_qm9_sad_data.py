@@ -112,7 +112,12 @@ def build_cell(xyz_path: Path, basis: str, cutoff: int, margin: int, xc: str):
 
 def make_mf(cell, xc: str, conv_tol: float):
     load_pyscf()
-    df = dft.multigrid.MultiGridFFTDF2(cell)
+    multigrid_df = getattr(dft.multigrid, "MultiGridFFTDF2", None)
+    if multigrid_df is None:
+        multigrid_df = dft.multigrid.MultiGridNumInt2
+    df = multigrid_df(cell)
+    if not hasattr(df, "kpts"):
+        df.kpts = np.zeros(3)
     mf = dft.rks.RKS(cell)
     mf.with_df = df
     mf.conv_tol = conv_tol
