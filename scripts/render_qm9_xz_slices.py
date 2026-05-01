@@ -24,6 +24,10 @@ def load_cfg_from_checkpoint(checkpoint_path: Path):
     raise ValueError("Could not find a config inside the checkpoint or a sibling config.yaml.")
 
 
+def is_experiment_21_checkpoint(checkpoint_path: Path) -> bool:
+    return any(part.startswith("experiment_21") for part in checkpoint_path.parts)
+
+
 def resolve_torch_device(device: str | torch.device | None) -> torch.device:
     if isinstance(device, torch.device):
         return device
@@ -230,6 +234,7 @@ def visualize_qm9_checkpoint_sample(
     checkpoint_path: str | Path,
     split_file: str | Path | None = None,
     *,
+    root: str | Path | None = None,
     sample_idx: int | None = None,
     seed: int | None = None,
     n_steps: int | None = None,
@@ -277,6 +282,11 @@ def visualize_qm9_checkpoint_sample(
                         pass
                 else:
                     pass
+    if root is not None:
+        try:
+            cfg.data["root"] = str(root)
+        except Exception:
+            setattr(cfg.data, "root", str(root))
 
     datamodule = instantiate(cfg.data)
     datamodule.setup(stage="fit")
@@ -391,6 +401,7 @@ def visualize_qm9_checkpoint_sample(
                 model.n_inference_steps = int(n_steps)
 
             model_cond = condition.clone()
+            zero_residual_rollout = module_type == "flow_with_time_res" and is_experiment_21_checkpoint(checkpoint_path)
             if module_type == "flow_with_time_res":
                 fork_devices = list(range(torch.cuda.device_count())) if torch_device.type == "cuda" else []
                 with torch.random.fork_rng(devices=fork_devices):
@@ -427,11 +438,16 @@ def visualize_qm9_checkpoint_sample(
                 t_batch = t_cur.expand(condition.shape[0])
                 if module_type == "flow_with_time_res":
                     y_hat = model(output_state, t_batch, cond=condition)
+                    if zero_residual_rollout:
+                        y_hat = model._zero_charge_residual(y_hat)
                 else:
                     y_hat = model(output_state, t_batch)
                 denom = (1.0 - t_cur).clamp(min=model.eps)
                 output_state = output_state + dt * (y_hat - output_state) / denom
-            output = condition + output_state if module_type == "flow_with_time_res" else output_state
+            if zero_residual_rollout:
+                output = condition + model._zero_charge_residual(output_state)
+            else:
+                output = condition + output_state if module_type == "flow_with_time_res" else output_state
             sampler_label = f"euler, {model.n_inference_steps} steps"
         else:
             source = torch.randn(tuple(label.shape), generator=generator, dtype=torch.float32).to(device=torch_device, dtype=label.dtype)

@@ -149,9 +149,10 @@ def test_visualize_time_flow_checkpoint_uses_condition_rollout(monkeypatch):
     class DummyModel:
         def __init__(self):
             self.n_inference_steps = 9
+            self.eps = 1e-4
 
-        def _sample(self, x):
-            return x + 1.0
+        def __call__(self, x, t):
+            return x + (1.0 - t).reshape(-1, 1, 1, 1, 1)
 
     dummy_model = DummyModel()
     cfg = SimpleNamespace(training_mode="flow_match_with_time", data={})
@@ -188,5 +189,111 @@ def test_visualize_time_flow_checkpoint_uses_condition_rollout(monkeypatch):
     assert torch.equal(result["initial_state"], result["condition"])
     assert torch.equal(result["initial_model_input"], result["condition"])
     assert torch.equal(result["output"], result["condition"] + 1.0)
+
+    plt.close(result["figure"])
+
+
+def test_experiment_21_time_res_rollout_zeroes_residual(monkeypatch):
+    render_qm9_xz_slices = _load_render_module()
+
+    class DummyDataModule:
+        def setup(self, stage=None):
+            self.val_set = [
+                {
+                    "data": torch.zeros(2, 2, 2),
+                    "label": torch.ones(2, 2, 2),
+                    "index": "sample-0",
+                }
+            ]
+
+    class DummyModel:
+        def __init__(self):
+            self.n_inference_steps = 1
+            self.eps = 1e-4
+            self.source_distribution = "zero_mean_gaussian"
+
+        def _sample_source_state(self, reference):
+            return torch.zeros_like(reference)
+
+        def __call__(self, x, _t, cond=None):
+            del cond
+            return torch.arange(x.numel(), dtype=x.dtype, device=x.device).reshape_as(x) + 1.0
+
+        def _zero_charge_residual(self, residual):
+            dims = tuple(range(1, residual.ndim))
+            return residual - residual.mean(dim=dims, keepdim=True)
+
+    dummy_model = DummyModel()
+    cfg = SimpleNamespace(training_mode="flow_match_with_time_res", data={})
+
+    monkeypatch.setattr(render_qm9_xz_slices, "load_cfg_from_checkpoint", lambda _checkpoint_path: cfg)
+    monkeypatch.setattr(render_qm9_xz_slices, "instantiate", lambda _data_cfg: DummyDataModule())
+    monkeypatch.setattr(
+        render_qm9_xz_slices,
+        "load_checkpoint_model_for_training_mode",
+        lambda *args, **kwargs: (dummy_model, "flow_with_time_res"),
+    )
+
+    result = render_qm9_xz_slices.visualize_qm9_checkpoint_sample(
+        Path("examples/QM9/experiment_21_runpod_res_cond_g/dummy.ckpt"),
+        sample_idx=0,
+        device="cpu",
+        show=False,
+    )
+
+    assert torch.isclose(result["output"].mean(), torch.tensor(0.0))
+
+    plt.close(result["figure"])
+
+
+def test_non_experiment_21_time_res_rollout_keeps_existing_residual_behavior(monkeypatch):
+    render_qm9_xz_slices = _load_render_module()
+
+    class DummyDataModule:
+        def setup(self, stage=None):
+            self.val_set = [
+                {
+                    "data": torch.zeros(2, 2, 2),
+                    "label": torch.ones(2, 2, 2),
+                    "index": "sample-0",
+                }
+            ]
+
+    class DummyModel:
+        def __init__(self):
+            self.n_inference_steps = 1
+            self.eps = 1e-4
+            self.source_distribution = "zero_mean_gaussian"
+
+        def _sample_source_state(self, reference):
+            return torch.zeros_like(reference)
+
+        def __call__(self, x, _t, cond=None):
+            del cond
+            return torch.arange(x.numel(), dtype=x.dtype, device=x.device).reshape_as(x) + 1.0
+
+        def _zero_charge_residual(self, residual):
+            dims = tuple(range(1, residual.ndim))
+            return residual - residual.mean(dim=dims, keepdim=True)
+
+    dummy_model = DummyModel()
+    cfg = SimpleNamespace(training_mode="flow_match_with_time_res", data={})
+
+    monkeypatch.setattr(render_qm9_xz_slices, "load_cfg_from_checkpoint", lambda _checkpoint_path: cfg)
+    monkeypatch.setattr(render_qm9_xz_slices, "instantiate", lambda _data_cfg: DummyDataModule())
+    monkeypatch.setattr(
+        render_qm9_xz_slices,
+        "load_checkpoint_model_for_training_mode",
+        lambda *args, **kwargs: (dummy_model, "flow_with_time_res"),
+    )
+
+    result = render_qm9_xz_slices.visualize_qm9_checkpoint_sample(
+        Path("examples/QM9/experiment_20_baseline_resunet/dummy.ckpt"),
+        sample_idx=0,
+        device="cpu",
+        show=False,
+    )
+
+    assert torch.isclose(result["output"].mean(), torch.tensor(4.5))
 
     plt.close(result["figure"])
