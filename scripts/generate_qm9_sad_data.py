@@ -181,6 +181,7 @@ def generate_one(
     xc: str,
     conv_tol: float,
     margin: int,
+    match_label_grid: bool,
     overwrite: bool,
 ) -> str:
     if (out_dir / "rho_22.npy").exists() and not overwrite:
@@ -198,6 +199,16 @@ def generate_one(
     cell22.build()
 
     mf22 = make_mf(cell22, xc, conv_tol)
+    if match_label_grid:
+        label_grid_path = label_dir / "grid_sizes_22.dat"
+        if not label_grid_path.exists():
+            raise FileNotFoundError(label_grid_path)
+        mesh = np.loadtxt(label_grid_path, dtype=int)
+        mf22.grids.mesh = mesh
+        mf22.with_df.mesh = mesh
+        if hasattr(mf22.with_df, "grids"):
+            mf22.with_df.grids.mesh = mesh
+
     dm0 = get_init_guess(mf22, basis1, basis2, box, f"gth-{xc}")
     nelec = np.trace(dm0 @ mf22.get_ovlp())
     if abs(nelec - mf22.cell.nelectron) / mf22.cell.nelectron > 0.01:
@@ -232,6 +243,11 @@ def main() -> None:
     parser.add_argument("--xc", default="pbe")
     parser.add_argument("--conv-tol", type=float, default=1e-11)
     parser.add_argument("--margin", type=int, default=4)
+    parser.add_argument(
+        "--match-label-grid",
+        action="store_true",
+        help="Evaluate SAD rho on label/grid_sizes_22.dat so data and label meshes match.",
+    )
     args = parser.parse_args()
 
     sample_ids = read_sample_ids(args)
@@ -258,6 +274,7 @@ def main() -> None:
                 xc=args.xc,
                 conv_tol=args.conv_tol,
                 margin=args.margin,
+                match_label_grid=args.match_label_grid,
                 overwrite=args.overwrite,
             )
         counts[result] += 1
