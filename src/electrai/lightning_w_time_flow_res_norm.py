@@ -25,14 +25,58 @@ class LightningGenerator(LightningModule):
         self.nmae_fn = NormMAE()
         self.n_inference_steps: int = getattr(cfg, "n_inference_steps", 10)
         self.eps: float = getattr(cfg, "eps", 1e-4)
+        self.source_distribution: str = getattr(cfg, "source_distribution", "zero").lower()
+        self.source_noise_scale: float = float(getattr(cfg, "source_noise_scale", 1.0))
+        self.residual_normalize: bool = self._as_bool(
+            getattr(cfg, "residual_normalize", getattr(cfg, "normalize_residual", False))
+        )
+        self.residual_mean: float = float(getattr(cfg, "residual_mean", 0.0))
+        self.residual_min: float = float(getattr(cfg, "residual_min", -1.0))
+        self.residual_max: float = float(getattr(cfg, "residual_max", 1.0))
+        self.residual_scale: float = max(
+            abs(self.residual_max - self.residual_mean),
+            abs(self.residual_mean - self.residual_min),
+        )
+        if self.residual_normalize and self.residual_scale <= 0.0:
+            raise ValueError("Residual normalization requires residual_min < residual_max.")
         self.log_dir: Path = Path()
         self.out_dir: Path = Path()
         self.tmp_dir: Path = Path()
         self.save_pred: bool = False
 
-    def forward(self, x, t=None): # input, and time
+    @staticmethod
+    def _as_bool(value: Any) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return bool(value)
+
+    def _residual_stat(self, value: float, reference: torch.Tensor) -> torch.Tensor:
+        return reference.new_tensor(value)
+
+    def _normalize_residual(self, residual: torch.Tensor) -> torch.Tensor:
+        if not self.residual_normalize:
+            return residual
+        return (
+            residual - self._residual_stat(self.residual_mean, residual)
+        ) / self._residual_stat(self.residual_scale, residual)
+
+    def _denormalize_residual(self, residual: torch.Tensor) -> torch.Tensor:
+        if not self.residual_normalize:
+            return residual
+        return (
+            residual * self._residual_stat(self.residual_scale, residual)
+            + self._residual_stat(self.residual_mean, residual)
+        )
+
+    def _zero_charge_model_residual(self, residual: torch.Tensor) -> torch.Tensor:
+        residual = self._zero_charge_residual(self._denormalize_residual(residual))
+        return self._normalize_residual(residual)
+
+    def forward(self, x, t=None, cond=None): # input, time, and optional condition
         if t is None:
             t = x.new_ones(x.shape[0])
+        if cond is not None:
+            return self.model(x, t, cond)
         return self.model(x, t)
 
     def training_step(self, batch):
@@ -184,12 +228,38 @@ class LightningGenerator(LightningModule):
         y = batch["label"]
         if isinstance(x, list): #never used, unless batch >1
             metrics = [
-                self._flow_metrics(x_i.unsqueeze(0), y_i.unsqueeze(0))
+                self._flow_metrics(
+                    self._sample_source_state(x_i.unsqueeze(0)),
+                    self._normalize_residual((y_i - x_i).unsqueeze(0)),
+                    cond=x_i.unsqueeze(0),
+                )
                 for x_i, y_i in zip(x, y, strict=True)
             ]
             sq_fro_losses, nmae_losses = zip(*metrics, strict=True)
             return torch.stack(sq_fro_losses).mean(), torch.stack(nmae_losses).mean()
-        return self._flow_metrics(x, y)
+        return self._flow_metrics(
+            self._sample_source_state(x), self._normalize_residual(y - x), cond=x
+        )
+
+    def _sample_source_state(self, reference: torch.Tensor) -> torch.Tensor:
+        if self.source_distribution in {"zero", "zeros", "deterministic_zero"}:
+            return torch.zeros_like(reference)
+        if self.source_distribution in {
+            "gaussian",
+            "standard_gaussian",
+            "zero_mean_gaussian",
+        }:
+            noise = torch.randn_like(reference)
+            noise = noise - noise.mean(dim=tuple(range(1, noise.ndim)), keepdim=True)
+            return self.source_noise_scale * noise
+        raise ValueError(
+            "Unknown source_distribution="
+            f"{self.source_distribution!r}. Expected 'zero' or 'zero_mean_gaussian'."
+        )
+
+    def _zero_charge_residual(self, residual: torch.Tensor) -> torch.Tensor:
+        dims = tuple(range(1, residual.ndim))
+        return residual - residual.mean(dim=dims, keepdim=True)
 
     def _flow_loss(self, x_0: torch.Tensor, x_1: torch.Tensor) -> torch.Tensor:
         """X-prediction flow loss. Interpolates x_t between x (low-res) and y (high-res),
@@ -198,15 +268,22 @@ class LightningGenerator(LightningModule):
         return loss
 
     def _flow_metrics(
-        self, x_0: torch.Tensor, x_1: torch.Tensor
+        self, x_0: torch.Tensor, x_1: torch.Tensor, cond: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         bsz = x_0.shape[0] #batch size, shoudl be 1
         # Sample t ~ Uniform[eps, 1-eps] per sample
         t = torch.rand(bsz, device=x_0.device) * (1 - 2 * self.eps) + self.eps #(1,)
         t_e = t.view(bsz, *([1] * (x_0.ndim - 1)))  # broadcast to match input tensor dims (B, 1, 1, 1,..)
         x_t = (1 - t_e) * x_0 + t_e * x_1  # linear interpolation low→high res
-        y_hat = self(x_t, t)  # t is 1-dim tensor
-        return self.loss_fn(y_hat, x_1), self.nmae_fn(y_hat, x_1)
+        y_hat = self(x_t, t, cond=cond)  # t is 1-dim tensor
+        y_hat = self._zero_charge_model_residual(y_hat)
+        y_hat_residual = self._denormalize_residual(y_hat)
+        x_1_residual = self._denormalize_residual(x_1)
+        if cond is None:
+            nmae = self.nmae_fn(y_hat_residual, x_1_residual)
+        else:
+            nmae = self.nmae_fn(cond + y_hat_residual, cond + x_1_residual)
+        return self.loss_fn(y_hat, x_1), nmae
 
     @torch.no_grad()
     def _sample(self, x: torch.Tensor) -> torch.Tensor:
@@ -216,7 +293,7 @@ class LightningGenerator(LightningModule):
         At the last step this reduces to x_t = y_hat exactly.
         """
         bsz = x.shape[0] #batch size, should be 1
-        x_t = x
+        x_t = self._sample_source_state(x)
         t_steps = torch.linspace(
             0.0, 1.0, self.n_inference_steps + 1, device=x.device, dtype=x.dtype
         )
@@ -224,10 +301,11 @@ class LightningGenerator(LightningModule):
             t_cur = t_steps[i]
             dt = t_steps[i + 1] - t_cur
             t_batch = t_cur.expand(bsz)
-            y_hat = self(x_t, t_batch)
+            y_hat = self(x_t, t_batch, cond=x)
+            y_hat = self._zero_charge_model_residual(y_hat)
             denom = (1.0 - t_cur).clamp(min=self.eps)
             x_t = x_t + dt * (y_hat - x_t) / denom
-        return x_t
+        return x + self._zero_charge_residual(self._denormalize_residual(x_t))
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(

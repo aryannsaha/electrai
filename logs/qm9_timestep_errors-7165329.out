@@ -1,0 +1,52 @@
+Http proxy settings allow access to a very limited and pre-approved list of internet API servers.
+This is documented on Research Computing website. General internet access is not supported.
+[eval_qm9_timestep_errors] Starting QM9 timestep error evaluation.
+[eval_qm9_timestep_errors] Config: /scratch/gpfs/ROSENGROUP/aryan/electrai/examples/QM9/experiment_16/config.yaml
+[eval_qm9_timestep_errors] Checkpoint: /scratch/gpfs/ROSENGROUP/aryan/electrai/examples/QM9/experiment_16/checkpoints/last.ckpt
+[eval_qm9_timestep_errors] Split file: /scratch/gpfs/ROSENGROUP/aryan/electrai/examples/QM9/experiment_5/split_4000.json
+[eval_qm9_timestep_errors] Output CSV: /scratch/gpfs/ROSENGROUP/aryan/electrai/scripts/qm9_timestep_errors.csv
+[eval_qm9_timestep_errors] Progress print interval: every 25 batch(es).
+[eval_qm9_timestep_errors] Loading config.
+[eval_qm9_timestep_errors] Instantiating data module.
+[eval_qm9_timestep_errors] Setting up data module with stage='fit'.
+[eval_qm9_timestep_errors] Validation loader ready with 800 batch(es).
+[eval_qm9_timestep_errors] Using device: cuda (NVIDIA A100 80GB PCIe).
+[eval_qm9_timestep_errors] Loading model checkpoint.
+[eval_qm9_timestep_errors] Model loaded and set to eval mode.
+[eval_qm9_timestep_errors] Running 3 inference steps per batch.
+[eval_qm9_timestep_errors] Finished batch 1/800; samples=1; elapsed=8.2s; final-step avg_rollout_vs_linear_frobenius=6.94556; final-step avg_rollout_vs_linear_nmae=0.0219859.
+[eval_qm9_timestep_errors] Finished batch 25/800; samples=25; elapsed=106.2s; final-step avg_rollout_vs_linear_frobenius=7.83633; final-step avg_rollout_vs_linear_nmae=0.0244114.
+[eval_qm9_timestep_errors] Finished batch 50/800; samples=50; elapsed=217.1s; final-step avg_rollout_vs_linear_frobenius=7.09176; final-step avg_rollout_vs_linear_nmae=0.0232644.
+[eval_qm9_timestep_errors] Finished batch 75/800; samples=75; elapsed=331.0s; final-step avg_rollout_vs_linear_frobenius=6.93155; final-step avg_rollout_vs_linear_nmae=0.0230343.
+[eval_qm9_timestep_errors] Finished batch 100/800; samples=100; elapsed=440.9s; final-step avg_rollout_vs_linear_frobenius=6.93373; final-step avg_rollout_vs_linear_nmae=0.0231945.
+[eval_qm9_timestep_errors] Finished batch 125/800; samples=125; elapsed=550.3s; final-step avg_rollout_vs_linear_frobenius=6.93867; final-step avg_rollout_vs_linear_nmae=0.0232192.
+[eval_qm9_timestep_errors] Finished batch 150/800; samples=150; elapsed=659.1s; final-step avg_rollout_vs_linear_frobenius=6.87061; final-step avg_rollout_vs_linear_nmae=0.0230354.
+[eval_qm9_timestep_errors] Finished batch 175/800; samples=175; elapsed=765.4s; final-step avg_rollout_vs_linear_frobenius=6.83082; final-step avg_rollout_vs_linear_nmae=0.0229486.
+[eval_qm9_timestep_errors] Finished batch 200/800; samples=200; elapsed=875.1s; final-step avg_rollout_vs_linear_frobenius=6.77517; final-step avg_rollout_vs_linear_nmae=0.0228595.
+[eval_qm9_timestep_errors] Finished batch 225/800; samples=225; elapsed=984.9s; final-step avg_rollout_vs_linear_frobenius=6.80054; final-step avg_rollout_vs_linear_nmae=0.0228922.
+[eval_qm9_timestep_errors] Finished batch 250/800; samples=250; elapsed=1097.6s; final-step avg_rollout_vs_linear_frobenius=6.79228; final-step avg_rollout_vs_linear_nmae=0.022926.
+[eval_qm9_timestep_errors] Finished batch 275/800; samples=275; elapsed=1204.0s; final-step avg_rollout_vs_linear_frobenius=6.87071; final-step avg_rollout_vs_linear_nmae=0.0230799.
+[eval_qm9_timestep_errors] Finished batch 300/800; samples=300; elapsed=1314.9s; final-step avg_rollout_vs_linear_frobenius=6.83885; final-step avg_rollout_vs_linear_nmae=0.0230065.
+[eval_qm9_timestep_errors] Finished batch 325/800; samples=325; elapsed=1426.0s; final-step avg_rollout_vs_linear_frobenius=6.79386; final-step avg_rollout_vs_linear_nmae=0.022907.
+[eval_qm9_timestep_errors] Finished batch 350/800; samples=350; elapsed=1529.5s; final-step avg_rollout_vs_linear_frobenius=6.78944; final-step avg_rollout_vs_linear_nmae=0.022861.
+[eval_qm9_timestep_errors] Finished batch 375/800; samples=375; elapsed=1642.7s; final-step avg_rollout_vs_linear_frobenius=6.7704; final-step avg_rollout_vs_linear_nmae=0.02285.
+[eval_qm9_timestep_errors] Finished batch 400/800; samples=400; elapsed=1754.9s; final-step avg_rollout_vs_linear_frobenius=6.79529; final-step avg_rollout_vs_linear_nmae=0.0229206.
+[eval_qm9_timestep_errors] Finished batch 425/800; samples=425; elapsed=1870.6s; final-step avg_rollout_vs_linear_frobenius=6.77769; final-step avg_rollout_vs_linear_nmae=0.0228674.
+[eval_qm9_timestep_errors] Finished batch 450/800; samples=450; elapsed=1978.8s; final-step avg_rollout_vs_linear_frobenius=6.75464; final-step avg_rollout_vs_linear_nmae=0.0227951.
+[eval_qm9_timestep_errors] Finished batch 475/800; samples=475; elapsed=2086.5s; final-step avg_rollout_vs_linear_frobenius=6.74409; final-step avg_rollout_vs_linear_nmae=0.0227846.
+[eval_qm9_timestep_errors] Finished batch 500/800; samples=500; elapsed=2190.7s; final-step avg_rollout_vs_linear_frobenius=6.74556; final-step avg_rollout_vs_linear_nmae=0.0227875.
+[eval_qm9_timestep_errors] Finished batch 525/800; samples=525; elapsed=2299.9s; final-step avg_rollout_vs_linear_frobenius=6.72316; final-step avg_rollout_vs_linear_nmae=0.0227294.
+[eval_qm9_timestep_errors] Finished batch 550/800; samples=550; elapsed=2403.0s; final-step avg_rollout_vs_linear_frobenius=6.71421; final-step avg_rollout_vs_linear_nmae=0.0226812.
+[eval_qm9_timestep_errors] Finished batch 575/800; samples=575; elapsed=2508.4s; final-step avg_rollout_vs_linear_frobenius=6.72161; final-step avg_rollout_vs_linear_nmae=0.0226775.
+[eval_qm9_timestep_errors] Finished batch 600/800; samples=600; elapsed=2617.3s; final-step avg_rollout_vs_linear_frobenius=6.70985; final-step avg_rollout_vs_linear_nmae=0.0226364.
+[eval_qm9_timestep_errors] Finished batch 625/800; samples=625; elapsed=2727.2s; final-step avg_rollout_vs_linear_frobenius=6.69822; final-step avg_rollout_vs_linear_nmae=0.0226239.
+[eval_qm9_timestep_errors] Finished batch 650/800; samples=650; elapsed=2836.3s; final-step avg_rollout_vs_linear_frobenius=6.69447; final-step avg_rollout_vs_linear_nmae=0.0226358.
+[eval_qm9_timestep_errors] Finished batch 675/800; samples=675; elapsed=2952.5s; final-step avg_rollout_vs_linear_frobenius=6.68252; final-step avg_rollout_vs_linear_nmae=0.0226254.
+[eval_qm9_timestep_errors] Finished batch 700/800; samples=700; elapsed=3060.1s; final-step avg_rollout_vs_linear_frobenius=6.67992; final-step avg_rollout_vs_linear_nmae=0.0226011.
+[eval_qm9_timestep_errors] Finished batch 725/800; samples=725; elapsed=3173.7s; final-step avg_rollout_vs_linear_frobenius=6.67313; final-step avg_rollout_vs_linear_nmae=0.0225884.
+[eval_qm9_timestep_errors] Finished batch 750/800; samples=750; elapsed=3281.5s; final-step avg_rollout_vs_linear_frobenius=6.67771; final-step avg_rollout_vs_linear_nmae=0.0225963.
+[eval_qm9_timestep_errors] Finished batch 775/800; samples=775; elapsed=3390.2s; final-step avg_rollout_vs_linear_frobenius=6.67823; final-step avg_rollout_vs_linear_nmae=0.0226101.
+[eval_qm9_timestep_errors] Finished batch 800/800; samples=800; elapsed=3501.9s; final-step avg_rollout_vs_linear_frobenius=6.66717; final-step avg_rollout_vs_linear_nmae=0.0225913.
+[eval_qm9_timestep_errors] Writing timestep averages to CSV.
+[eval_qm9_timestep_errors] Wrote /scratch/gpfs/ROSENGROUP/aryan/electrai/scripts/qm9_timestep_errors.csv
+[eval_qm9_timestep_errors] Completed in 3501.9s.

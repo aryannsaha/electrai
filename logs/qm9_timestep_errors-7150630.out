@@ -1,0 +1,38 @@
+Http proxy settings allow access to a very limited and pre-approved list of internet API servers.
+This is documented on Research Computing website. General internet access is not supported.
+[eval_qm9_timestep_errors] Starting QM9 timestep error evaluation.
+[eval_qm9_timestep_errors] Config: /scratch/gpfs/ROSENGROUP/aryan/electrai/examples/QM9/experiment_16/config.yaml
+[eval_qm9_timestep_errors] Checkpoint: /scratch/gpfs/ROSENGROUP/aryan/electrai/examples/QM9/experiment_16/checkpoints/last.ckpt
+[eval_qm9_timestep_errors] Split file: /scratch/gpfs/ROSENGROUP/aryan/electrai/examples/QM9/experiment_5/split_4000.json
+[eval_qm9_timestep_errors] Output CSV: /scratch/gpfs/ROSENGROUP/aryan/electrai/scripts/qm9_timestep_errors.csv
+[eval_qm9_timestep_errors] Progress print interval: every 25 batch(es).
+[eval_qm9_timestep_errors] Loading config.
+[eval_qm9_timestep_errors] Instantiating data module.
+[eval_qm9_timestep_errors] Setting up data module with stage='fit'.
+[eval_qm9_timestep_errors] Validation loader ready with 800 batch(es).
+[eval_qm9_timestep_errors] Using device: cuda (NVIDIA A100 80GB PCIe MIG 3g.40gb).
+[eval_qm9_timestep_errors] Loading model checkpoint.
+[eval_qm9_timestep_errors] Model loaded and set to eval mode.
+[eval_qm9_timestep_errors] Running 10 inference steps per batch.
+[eval_qm9_timestep_errors] Finished batch 1/800; samples=1; elapsed=33.8s; final-step avg_frobenius=6.4839; final-step avg_nmae=0.0245179.
+[eval_qm9_timestep_errors] Finished batch 25/800; samples=25; elapsed=660.1s; final-step avg_frobenius=7.38361; final-step avg_nmae=0.025379.
+[eval_qm9_timestep_errors] Finished batch 50/800; samples=50; elapsed=1365.1s; final-step avg_frobenius=6.73057; final-step avg_nmae=0.0244352.
+[eval_qm9_timestep_errors] Finished batch 75/800; samples=75; elapsed=2088.5s; final-step avg_frobenius=6.64574; final-step avg_nmae=0.0242288.
+[eval_qm9_timestep_errors] Finished batch 100/800; samples=100; elapsed=2786.3s; final-step avg_frobenius=6.6799; final-step avg_nmae=0.024404.
+[eval_qm9_timestep_errors] Finished batch 125/800; samples=125; elapsed=3482.1s; final-step avg_frobenius=6.65161; final-step avg_nmae=0.0244058.
+[eval_qm9_timestep_errors] Finished batch 150/800; samples=150; elapsed=4174.9s; final-step avg_frobenius=6.63912; final-step avg_nmae=0.0244255.
+[eval_qm9_timestep_errors] Finished batch 175/800; samples=175; elapsed=4851.4s; final-step avg_frobenius=6.56508; final-step avg_nmae=0.0242982.
+[eval_qm9_timestep_errors] Finished batch 200/800; samples=200; elapsed=5549.3s; final-step avg_frobenius=6.49889; final-step avg_nmae=0.0242047.
+[eval_qm9_timestep_errors] Finished batch 225/800; samples=225; elapsed=6247.3s; final-step avg_frobenius=6.56309; final-step avg_nmae=0.0243537.
+[eval_qm9_timestep_errors] Finished batch 250/800; samples=250; elapsed=6964.5s; final-step avg_frobenius=6.54475; final-step avg_nmae=0.0243687.
+[eval_qm9_timestep_errors] Finished batch 275/800; samples=275; elapsed=7639.0s; final-step avg_frobenius=6.59943; final-step avg_nmae=0.024487.
+[eval_qm9_timestep_errors] Finished batch 300/800; samples=300; elapsed=8344.8s; final-step avg_frobenius=6.57258; final-step avg_nmae=0.0244291.
+[eval_qm9_timestep_errors] Finished batch 325/800; samples=325; elapsed=9049.2s; final-step avg_frobenius=6.53143; final-step avg_nmae=0.0243234.
+[eval_qm9_timestep_errors] Finished batch 350/800; samples=350; elapsed=9708.0s; final-step avg_frobenius=6.51702; final-step avg_nmae=0.0242442.
+[eval_qm9_timestep_errors] Finished batch 375/800; samples=375; elapsed=10427.9s; final-step avg_frobenius=6.48729; final-step avg_nmae=0.024203.
+[eval_qm9_timestep_errors] Finished batch 400/800; samples=400; elapsed=11141.3s; final-step avg_frobenius=6.52614; final-step avg_nmae=0.0243043.
+[eval_qm9_timestep_errors] Finished batch 425/800; samples=425; elapsed=11876.7s; final-step avg_frobenius=6.50103; final-step avg_nmae=0.0242407.
+[eval_qm9_timestep_errors] Finished batch 450/800; samples=450; elapsed=12564.6s; final-step avg_frobenius=6.47515; final-step avg_nmae=0.0241837.
+[eval_qm9_timestep_errors] Finished batch 475/800; samples=475; elapsed=13248.0s; final-step avg_frobenius=6.46848; final-step avg_nmae=0.0241761.
+[eval_qm9_timestep_errors] Finished batch 500/800; samples=500; elapsed=13909.9s; final-step avg_frobenius=6.47537; final-step avg_nmae=0.024207.
+[eval_qm9_timestep_errors] Finished batch 525/800; samples=525; elapsed=14605.1s; final-step avg_frobenius=6.4496; final-step avg_nmae=0.0241615.

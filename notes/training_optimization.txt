@@ -1,0 +1,249 @@
+Training Optimization Notes — Experiment 22 (ResUNet3DTimeCond, QM9)
+Generated: 2026-05-05
+=======================================================================
+
+CURRENT SETUP
+-------------
+- 4 nodes x 4 A100 80GB GPUs = 16 GPUs total
+- precision: 32 (full float32)
+- batch_size: 1 per GPU (16 effective global batch)
+- train_workers: 8 per process (128 total worker processes)
+- Gradient checkpointing: ON for every ResBlock (all 32 blocks)
+- Training speed: ~0.09 it/s, ~43 min/epoch
+- Validation speed: ~0.14 it/s, ~6 min/epoch
+- GPU utilization: near 100% (compute-bound, NOT I/O-bound)
+
+Because GPU utilization is ~100%, the bottleneck is GPU computation itself,
+not data loading. All gains come from making each GPU operation cheaper.
+
+
+=======================================================================
+OPTIMIZATION ROADMAP
+=======================================================================
+
+TIER 1 — Highest impact, lowest risk
+--------------------------------------
+
+1. SWITCH TO BF16 MIXED PRECISION  (likely 1.5–3x speedup)
+
+   A100 GPUs have tensor cores that run BF16 matrix multiply at ~10x the
+   throughput of FP32. Your 3D convolutions and linear layers directly benefit.
+   BF16 is preferred over FP16 on A100s because it has the same dynamic range
+   as FP32 and almost never produces NaNs.
+
+   In config.yaml, change:
+       precision: bf16-mixed    # was: 32
+
+   That's it — Lightning handles casting automatically.
+
+2. DISABLE GRADIENT CHECKPOINTING  (likely ~30% speedup)
+
+   Gradient checkpointing saves memory by re-running the forward pass during
+   backprop instead of storing intermediate activations. It trades memory for
+   compute — useful when OOM, but costly otherwise (~30% recomputation overhead).
+
+   With batch_size=1 on A100 80GB you almost certainly have ample memory.
+   Currently ON for all 32 residual blocks (src/electrai/model/resunet_time_cond.py).
+
+   In resunet_time_cond.py, change the ResBlock3DTime default:
+       def __init__(self, cin, cout, k, temb_dim, use_checkpoint=False):  # was True
+
+   Watch GPU memory with: nvidia-smi -l 1
+   If you hit OOM, re-enable it. Switching to BF16 also halves activation
+   memory, so disabling checkpointing is safer after BF16 is confirmed working.
+
+
+TIER 2 — Medium impact, one-line changes
+------------------------------------------
+
+3. REDUCE NCCL DEBUG VERBOSITY
+
+   In run_multi_repeat.sh, change:
+       export NCCL_DEBUG=WARN    # was: INFO
+
+   NCCL_DEBUG=INFO logs every collective communication event — overhead and noise.
+
+4. REDUCE LOGGING FREQUENCY
+
+   In src/electrai/entrypoints/train.py (Trainer constructor):
+       log_every_n_steps=10,    # was: 1
+
+   log_every_n_steps=1 forces a CPU-GPU sync every single step.
+   With 200 steps/epoch this adds meaningful overhead.
+
+5. ADD torch.compile
+
+   PyTorch 2.x can JIT-compile the model graph, fusing ops and reducing kernel
+   launch overhead. Typical gain: 20–40% for conv-heavy models.
+
+   In train.py, after lit_model is constructed:
+       lit_model.model = torch.compile(lit_model.model)
+
+   NOTE: torch.compile is incompatible with gradient checkpointing.
+   Disable checkpointing (item 2) before enabling this.
+   First epoch will be slow (compilation time) — this is expected.
+
+6. TUNE OMP_NUM_THREADS
+
+   torchrun sets OMP_NUM_THREADS=1 by default (safe, but underutilizes CPUs).
+   You have --cpus-per-task=8, so add to the SLURM script before srun:
+       export OMP_NUM_THREADS=4
+
+   Helps CPU-side operations in dataloader workers and BLAS calls.
+
+
+TIER 3 — SKIPPED (not applicable)
+------------------------------------
+
+GPU utilization is ~100%, so the training is compute-bound, not I/O-bound.
+Data loading optimizations (prefetch_factor, num_workers tuning) would not help.
+
+
+TIER 4 — Consider, but test carefully
+---------------------------------------
+
+7. GRADIENT ACCUMULATION (wire up the unused nbatch config param)
+
+   The config has nbatch: 1, which was used for gradient accumulation in the
+   old codebase but is currently ignored by the Lightning Trainer.
+
+   To re-enable it, in train.py inside Trainer():
+       accumulate_grad_batches=int(getattr(cfg, 'nbatch', 1)),
+
+   Then set nbatch: 4 in config.yaml to get an effective batch of 64
+   (4 x 16 GPUs) while keeping per-GPU memory at batch_size=1.
+
+8. VALIDATE LESS FREQUENTLY
+
+   Validation currently runs every epoch (~6 min with rollout).
+   To validate every 5 epochs instead, add to Trainer():
+       val_check_interval=5,
+
+
+RECOMMENDED ORDER OF OPERATIONS
+----------------------------------
+
+Step 1: Switch precision: bf16-mixed in config.yaml.
+        Confirm training runs without NaN loss.
+Step 2: Disable gradient checkpointing (use_checkpoint=False default).
+        Watch nvidia-smi to confirm no OOM.
+Step 3: Set NCCL_DEBUG=WARN and log_every_n_steps=10.
+Step 4: Add torch.compile after checkpointing is disabled.
+Step 5: Use PyTorch Profiler (see below) if you want to find what's next.
+
+Expected outcome of steps 1–2 alone: ~43 min/epoch → ~15 min/epoch.
+
+
+=======================================================================
+PROFILING TOOLS
+=======================================================================
+
+1. PyTorch Profiler (easiest — start here)
+-------------------------------------------
+Built into PyTorch, no extra install. Records which operations (convolutions,
+norms, backward passes) take the most wall-clock and CUDA time.
+
+Tells you: "Of my 11-second step, 7s are in Conv3d forward, 2s in InstanceNorm3d backward."
+
+Usage (add temporarily to a short training run):
+
+    import torch
+
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        schedule=torch.profiler.schedule(wait=1, warmup=2, active=3),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler("./profiler_logs"),
+        record_shapes=True,
+        with_stack=False,
+    ) as prof:
+        for step, batch in enumerate(dataloader):
+            train_step(batch)
+            prof.step()
+            if step >= 6:
+                break
+
+    print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=20))
+
+The tensorboard_trace_handler saves a .json viewable in Chrome at chrome://tracing
+or in TensorBoard. Run on a short job (max_steps=10) to avoid huge trace files.
+
+
+2. NVIDIA Nsight Systems (nsys) — macro-level timeline
+-------------------------------------------------------
+NVIDIA's free system-level profiler. Captures a full timeline: GPU kernels,
+CPU activity, NCCL communication, CUDA memory transfers.
+
+Tells you: "Here's where the GPU is idle waiting for NCCL all-reduce. Here's
+the gap between steps caused by a CPU bottleneck."
+
+Usage — prepend to your torchrun launch:
+
+    nsys profile \
+        --output ./nsys_output \
+        --trace cuda,nvtx,osrt \
+        --duration 60 \
+        torchrun ... ./src/electrai/entrypoints/main.py train ...
+
+Generates a .nsys-rep file. Open with Nsight Systems GUI (free from NVIDIA)
+on your laptop to see an interactive timeline.
+
+Best for: Understanding distributed training behavior — are GPUs stalling
+during gradient sync? Is there a CPU bottleneck between steps?
+
+
+3. NVIDIA Nsight Compute (ncu) — kernel-level deep dive (advanced)
+--------------------------------------------------------------------
+The lowest-level profiler. Reports how efficiently each individual CUDA kernel
+uses GPU hardware: memory bandwidth, compute utilization, register pressure.
+
+Tells you: "Your Conv3d kernel runs at 45% memory bandwidth — switching to BF16
+would halve memory traffic and likely double its speed."
+
+Usage:
+
+    ncu --set full \
+        --target-processes all \
+        -o ./ncu_report \
+        python3 ./src/electrai/entrypoints/main.py train --config ...
+
+WARNING: Very slow (replays each kernel many times). Only run on a 2–5 step job.
+Only use after PyTorch Profiler identifies which kernel is slow.
+Interpreting output typically requires CUDA expertise.
+
+
+4. WandB / TensorBoard — training metrics over time
+----------------------------------------------------
+Already in use. After any optimization, compare:
+- Loss per wall-clock hour (not per epoch — epochs get faster)
+- GPU memory usage
+- Steps/second
+
+Always measure a baseline before changing anything.
+
+
+=======================================================================
+KEY FILES MENTIONED
+=======================================================================
+
+config.yaml:
+  examples/QM9/experiment_22/config.yaml
+  -> precision, batch_size, nbatch, n_inference_steps
+
+SLURM script:
+  examples/QM9/experiment_22/run_multi_repeat.sh
+  -> NCCL_DEBUG, OMP_NUM_THREADS, node/GPU counts
+
+Lightning trainer:
+  src/electrai/entrypoints/train.py
+  -> Trainer() constructor: log_every_n_steps, accumulate_grad_batches, val_check_interval
+  -> torch.compile call goes after lit_model construction
+
+Model (gradient checkpointing):
+  src/electrai/model/resunet_time_cond.py
+  -> ResBlock3DTime.__init__: use_checkpoint parameter (line ~32)
+
+Lightning module (training/validation logic):
+  src/electrai/lightning_w_time_flow_res.py

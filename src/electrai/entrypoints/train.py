@@ -8,23 +8,69 @@ import torch
 import yaml
 from hydra.utils import instantiate
 from lightning.pytorch import Trainer
-from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.callbacks import Callback, LearningRateMonitor, ModelCheckpoint
 
 from electrai.lightning import LightningGenerator
 from electrai.lightning_flow import LightningFlowMatch
 from electrai.lightning_flow_cond_aug import LightningFlowMatchCondAug
-from electrai.lightning_flow_pretrained_cond import LightningFlowMatchPretrainedCond
-from electrai.lightning_flow_reflow import LightningFlowMatchReflow
-from electrai.lightning_flow_residual import LightningFlowMatchResidual
-from electrai.lightning_flow_residual_displacement import (
-    LightningFlowMatchResidualDisplacement,
-)
-from electrai.lightning_flow_test import LightningFlowTest
-from electrai.lightning_w_time import LightningGenerator as LightningGeneratorWithTime
-from electrai.lightning_w_time_flow import LightningGenerator as LightningGeneratorFlowWithTime
 from electrai.lightning_w_time_flow_res import (
     LightningGenerator as LightningGeneratorFlowWithTimeResidual,
 )
+from electrai.lightning_w_time_flow_res_norm import (
+    LightningGenerator as LightningGeneratorFlowWithTimeResidualNorm,
+)
+
+
+class StopAfterCheckpointForRequeue(Callback):
+    def __init__(self, ckpt_path: Path, flag_path: Path):
+        self.ckpt_path = ckpt_path
+        self.flag_path = flag_path
+        self._seen_checkpoints: dict[Path, int] = {}
+
+    def on_fit_start(self, trainer, pl_module) -> None:
+        self._seen_checkpoints = self._checkpoint_state()
+
+    def on_validation_end(self, trainer, pl_module) -> None:
+        if trainer.sanity_checking:
+            return
+
+        checkpoint = (
+            self._new_or_updated_checkpoint() if trainer.is_global_zero else None
+        )
+        checkpoint_text = str(checkpoint) if checkpoint is not None else ''
+        checkpoint_text = trainer.strategy.broadcast(checkpoint_text, src=0)
+        if not checkpoint_text:
+            return
+
+        if trainer.is_global_zero:
+            self.flag_path.parent.mkdir(parents=True, exist_ok=True)
+            self.flag_path.write_text(
+                f"checkpoint={checkpoint_text}\nepoch={trainer.current_epoch}\n"
+            )
+            pl_module.print(
+                "Validation checkpoint written; stopping so SLURM can requeue."
+            )
+        trainer.should_stop = True
+
+    def _checkpoint_state(self) -> dict[Path, int]:
+        if not self.ckpt_path.exists():
+            return {}
+        return {
+            checkpoint: checkpoint.stat().st_mtime_ns
+            for checkpoint in self.ckpt_path.glob("*.ckpt")
+            if checkpoint.is_file()
+        }
+
+    def _new_or_updated_checkpoint(self) -> Path | None:
+        current = self._checkpoint_state()
+        for checkpoint, mtime_ns in sorted(
+            current.items(), key=lambda item: item[1], reverse=True
+        ):
+            if self._seen_checkpoints.get(checkpoint) != mtime_ns:
+                self._seen_checkpoints = current
+                return checkpoint
+        self._seen_checkpoints = current
+        return None
 
 
 def train(args):
@@ -47,24 +93,12 @@ def train(args):
     training_mode = getattr(cfg, 'training_mode', 'default')
     if training_mode == 'flow_match':
         lit_model = LightningFlowMatch(cfg)
-    elif training_mode == 'flow_match_reflow':
-        lit_model = LightningFlowMatchReflow(cfg)
-    elif training_mode == 'flow_match_residual':
-        lit_model = LightningFlowMatchResidual(cfg)
-    elif training_mode == 'flow_match_residual_displacement':
-        lit_model = LightningFlowMatchResidualDisplacement(cfg)
     elif training_mode == 'flow_match_cond_aug':
         lit_model = LightningFlowMatchCondAug(cfg)
-    elif training_mode == 'flow_match_pretrained_cond':
-        lit_model = LightningFlowMatchPretrainedCond(cfg)
-    elif training_mode == 'flow_match_test':
-        lit_model = LightningFlowTest(cfg)
-    elif training_mode == 'regression_with_time':
-        lit_model = LightningGeneratorWithTime(cfg)
-    elif training_mode == 'flow_match_with_time':
-        lit_model = LightningGeneratorFlowWithTime(cfg)
     elif training_mode == 'flow_match_with_time_res':
         lit_model = LightningGeneratorFlowWithTimeResidual(cfg)
+    elif training_mode == 'flow_match_with_time_res_norm':
+        lit_model = LightningGeneratorFlowWithTimeResidualNorm(cfg)
     else:
         lit_model = LightningGenerator(cfg)
 
@@ -131,6 +165,12 @@ def train(args):
     )
 
     lr_monitor = LearningRateMonitor(logging_interval='epoch')
+    callbacks = [checkpoint_cb, lr_monitor]
+    requeue_flag_path = os.environ.get('ELECTRAI_REQUEUE_AFTER_CHECKPOINT_FLAG')
+    if requeue_flag_path:
+        callbacks.append(
+            StopAfterCheckpointForRequeue(ckpt_path, Path(requeue_flag_path))
+        )
 
     # -----------------------------
     # Trainer
@@ -143,7 +183,7 @@ def train(args):
     trainer = Trainer(
         max_epochs=int(cfg.epochs),
         logger=wandb_logger,
-        callbacks=[checkpoint_cb, lr_monitor],
+        callbacks=callbacks,
         accelerator='gpu' if torch.cuda.is_available() else 'cpu',
         precision=cfg.precision,
         devices='auto',
